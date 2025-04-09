@@ -12,6 +12,7 @@ from flask_login import LoginManager
 from services.auth_service import UserAuth, get_user_by_id
 from database.db import db, init_db
 from services.movie_service import get_movie_by_id, get_tmdb_similar_movies, get_all_movies, get_high_rated_movies, enrich_movies_list, search_movies, get_movies_by_genre
+from typing import List, Dict, Tuple
 
 # Import simple app functionality
 from simple_app import load_movies, build_tfidf_matrix, get_movie_recommendations, get_unique_genres
@@ -84,35 +85,97 @@ def create_app(test_config=None):
     @app.route('/')
     def index():
         """Render the homepage."""
-        # Get popular movies with TMDb data
+        # Initialize with empty lists in case of errors
+        popular_movies = []
+        top_rated_movies = []
+        
+        # Temporarily raise the logging level for movie_service to suppress warnings
+        movie_service_logger = logging.getLogger('services.movie_service')
+        original_level = movie_service_logger.level
+        movie_service_logger.setLevel(logging.ERROR)
+        
         try:
-            # Get more movies than needed to ensure we have enough with posters
-            popular_movies, _ = get_all_movies(page=1, per_page=24, sort_by='popularity', sort_order='desc')
-            top_rated_movies, _ = get_high_rated_movies(limit=24, min_ratings=5)
+            # First try using the standard service functions
+            popular_movies_result = get_all_movies(page=1, per_page=24, sort_by='popularity', sort_order='desc')
+            if popular_movies_result and len(popular_movies_result) == 2:
+                popular_movies, _ = popular_movies_result
+            
+            top_rated_result = get_high_rated_movies_for_home(limit=24, min_ratings=5)
+            if top_rated_result and len(top_rated_result) == 2:
+                top_rated_movies, _ = top_rated_result
             
             # Enrich with TMDb data
-            popular_movies = enrich_movies_list(popular_movies)
-            top_rated_movies = enrich_movies_list(top_rated_movies)
-            
-            # Filter for movies with poster URLs and limit to 8
-            popular_movies = [movie for movie in popular_movies if movie.get('tmdb_poster_url') and 'placeholder' not in movie.get('tmdb_poster_url', '')][:8]
-            top_rated_movies = [movie for movie in top_rated_movies if movie.get('tmdb_poster_url') and 'placeholder' not in movie.get('tmdb_poster_url', '')][:8]
-            
-            # If we don't have enough movies with posters, fill with the rest
-            if len(popular_movies) < 8:
-                remaining_movies = [movie for movie in enrich_movies_list(popular_movies, with_tmdb=True) 
-                                   if movie not in popular_movies][:8-len(popular_movies)]
-                popular_movies.extend(remaining_movies)
+            if popular_movies:
+                popular_movies = enrich_movies_list(popular_movies)
+                popular_movies = [movie for movie in popular_movies if movie.get('tmdb_poster_url')][:8]
                 
-            if len(top_rated_movies) < 8:
-                remaining_movies = [movie for movie in enrich_movies_list(top_rated_movies, with_tmdb=True) 
-                                   if movie not in top_rated_movies][:8-len(top_rated_movies)]
-                top_rated_movies.extend(remaining_movies)
+            if top_rated_movies:
+                top_rated_movies = enrich_movies_list(top_rated_movies)
+                top_rated_movies = [movie for movie in top_rated_movies if movie.get('tmdb_poster_url')][:8]
         except Exception as e:
-            print(f"Error getting movies for homepage: {e}")
-            # Fallback to simple movies from movies_df
-            popular_movies = movies_df.head(8).to_dict('records')
-            top_rated_movies = popular_movies
+            print(f"Error getting movies via services: {e}")
+        
+        # If we don't have enough movies, try a direct approach
+        if len(popular_movies) < 8 or len(top_rated_movies) < 8:
+            try:
+                # Get movies directly from DataLoader
+                from data.data_loader import DataLoader
+                data_loader = DataLoader(movies_path='data/movies.csv')
+                
+                # Get all movies for processing
+                all_movies_df = data_loader.get_movies()
+                
+                # If popular movies are missing, use movies sorted by title
+                if len(popular_movies) < 8:
+                    try:
+                        direct_movies = all_movies_df.sort_values('title').head(16).to_dict('records')
+                        direct_movies = enrich_movies_list(direct_movies)
+                        popular_movies = [m for m in direct_movies if m.get('tmdb_poster_url')][:8]
+                    except Exception as e:
+                        print(f"Error getting direct popular movies: {e}")
+                
+                # If top rated movies are missing, use the next 8 movies
+                if len(top_rated_movies) < 8:
+                    try:
+                        if len(popular_movies) >= 8:
+                            # Use different movies than popular_movies
+                            remaining = all_movies_df.sample(16).to_dict('records')
+                            remaining = enrich_movies_list(remaining)
+                            top_rated_movies = [m for m in remaining if m.get('tmdb_poster_url')][:8]
+                        else:
+                            # Just use some random movies
+                            random_movies = all_movies_df.sample(16).to_dict('records')
+                            random_movies = enrich_movies_list(random_movies)
+                            if len(popular_movies) == 0:
+                                # Split between popular and top rated
+                                movies_with_posters = [m for m in random_movies if m.get('tmdb_poster_url')]
+                                mid = len(movies_with_posters) // 2
+                                popular_movies = movies_with_posters[:mid]
+                                top_rated_movies = movies_with_posters[mid:mid+8]
+                            else:
+                                top_rated_movies = [m for m in random_movies if m.get('tmdb_poster_url')][:8]
+                    except Exception as e:
+                        print(f"Error getting direct top rated movies: {e}")
+            except Exception as e:
+                print(f"Error using direct DataLoader approach: {e}")
+                
+                # Final fallback - use simple_app if everything else fails
+                if len(popular_movies) < 8 or len(top_rated_movies) < 8:
+                    try:
+                        from simple_app import load_movies
+                        movies_df = load_movies()
+                        fallback_movies = movies_df.head(16).to_dict('records')
+                        fallback_movies = enrich_movies_list(fallback_movies)
+                        
+                        if len(popular_movies) < 8:
+                            popular_movies = fallback_movies[:8]
+                        if len(top_rated_movies) < 8:
+                            top_rated_movies = fallback_movies[8:16] if len(fallback_movies) > 8 else fallback_movies[:8]
+                    except Exception as e:
+                        print(f"Error with final fallback: {e}")
+        
+        # Restore original logging level
+        movie_service_logger.setLevel(original_level)
         
         # Get all genres
         genres = get_unique_genres()
@@ -299,17 +362,56 @@ def create_app(test_config=None):
 
     # Setup logging
     if not app.debug:
+        # Configure logging with proper encoding for all handlers
+        import sys
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]',
             handlers=[
-                logging.FileHandler(os.path.join(app.instance_path, 'app.log')),
-                logging.StreamHandler()
+                logging.FileHandler(os.path.join(app.instance_path, 'app.log'), encoding='utf-8'),
+                logging.StreamHandler(stream=sys.stdout)  # Use stdout which handles Unicode better
             ]
         )
+    else:
+        # In debug mode, configure with a higher threshold for warnings to reduce noise
+        import sys
+        logging.basicConfig(
+            level=logging.WARNING,  # Show only WARNING and above in debug mode
+            format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]',
+            handlers=[
+                logging.FileHandler(os.path.join(app.instance_path, 'app.log'), encoding='utf-8'),
+                logging.StreamHandler(stream=sys.stdout)
+            ]
+        )
+        # Set higher threshold for specific loggers that are too verbose
+        logging.getLogger('services.movie_service').setLevel(logging.ERROR)
+        logging.getLogger('services.tmdb_service').setLevel(logging.ERROR)
 
     return app
 
+def get_high_rated_movies_for_home(limit: int = 10, min_ratings: int = 10) -> Tuple[List[Dict], int]:
+    """
+    Wrapper for get_high_rated_movies that ensures consistent return format with get_all_movies.
+    
+    Args:
+        limit: Maximum number of movies to return
+        min_ratings: Minimum number of ratings required
+        
+    Returns:
+        Tuple of (list of movie dictionaries, total count)
+    """
+    try:
+        from services.movie_service import get_high_rated_movies
+        
+        # Get high rated movies
+        movies_list = get_high_rated_movies(limit=limit, min_ratings=min_ratings)
+        
+        # Return in format consistent with get_all_movies
+        return movies_list, len(movies_list)
+        
+    except Exception as e:
+        print(f"Error in get_high_rated_movies_for_home: {e}")
+        return [], 0
 
 if __name__ == '__main__':
     app = create_app()

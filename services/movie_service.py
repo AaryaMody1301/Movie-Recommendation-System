@@ -371,7 +371,8 @@ def get_tmdb_id_for_movie(movie: Dict) -> Optional[int]:
         
         return None
     except Exception as e:
-        logger.error(f"Error getting TMDb ID for movie {movie.get('title')}: {str(e)}")
+        # Only log movie ID to avoid Unicode issues
+        logger.error(f"Error getting TMDb ID for movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
         return None
 
 def enrich_movie_with_tmdb(movie: Dict) -> Dict:
@@ -398,7 +399,8 @@ def enrich_movie_with_tmdb(movie: Dict) -> Dict:
         
         if not tmdb_id:
             # No TMDb match found, return movie with default empty fields
-            logger.warning(f"No TMDb match found for movie {movie.get('title')}")
+            # Use debug instead of warning to reduce console noise
+            logger.debug(f"No TMDb match found for movie {movie.get('movieId')}")
             return enriched_movie
         
         # Store the TMDb ID in the movie dictionary
@@ -441,7 +443,8 @@ def enrich_movie_with_tmdb(movie: Dict) -> Dict:
         
         return enriched_movie
     except Exception as e:
-        logger.error(f"Error enriching movie {movie.get('title')} with TMDb data: {str(e)}")
+        # Only log movie ID to avoid Unicode issues
+        logger.error(f"Error enriching movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
         # Return the original movie data on error, don't return None
         return movie
 
@@ -497,7 +500,8 @@ def enrich_movies_list(movies: List[Dict], with_tmdb: bool = True) -> List[Dict]
             enriched_movie = enrich_movie_with_tmdb(movie)
             enriched_movies.append(enriched_movie)
         except Exception as e:
-            logger.error(f"Error enriching movie {movie.get('title')}: {str(e)}")
+            # Only log movie ID to avoid Unicode issues
+            logger.error(f"Error enriching movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
             # Add the original movie to the list on error
             enriched_movies.append(movie)
     

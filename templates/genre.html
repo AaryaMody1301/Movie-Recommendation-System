@@ -1,5 +1,10 @@
 {% extends "base.html" %} {% block title %}{{ genre }} Movies{% endblock %} {%
-block content %}
+block head %} {{ super() }}
+<link
+  rel="stylesheet"
+  href="{{ url_for('static', filename='css/movie-placeholder.css') }}"
+/>
+{% endblock %} {% block content %}
 <h2 class="mb-4">{{ genre }} Movies</h2>
 
 {% if movies %}
@@ -7,19 +12,23 @@ block content %}
   {% for movie in movies %}
   <div class="col">
     <div class="card h-100">
-      {% if movie.tmdb_poster_url %}
+      {% if movie.tmdb_poster_url and not
+      movie.tmdb_poster_url.startswith('https://via.placeholder.com') %}
       <img
         src="{{ movie.tmdb_poster_url }}"
         class="card-img-top"
         alt="{{ movie.title }}"
         style="height: 300px; object-fit: cover"
+        onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/movie-placeholder.jpg') }}';"
       />
       {% else %}
-      <img
-        src="{{ url_for('static', filename='img/movie-placeholder.jpg') }}"
-        class="card-img-top"
-        alt="{{ movie.title }}"
-      />
+      <div class="movie-placeholder">
+        <div class="movie-placeholder-icon">🎬</div>
+        <div class="movie-placeholder-text">
+          <div class="movie-placeholder-title">Movie Poster</div>
+          <div class="movie-placeholder-description">Not Available</div>
+        </div>
+      </div>
       {% endif %}
       <div class="card-body">
         <h5 class="card-title">{{ movie.title }}</h5>
