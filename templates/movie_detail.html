@@ -1,0 +1,66 @@
+{% extends "base.html" %} {% block title %}{{ movie.title }} - Movie
+Recommendation System{% endblock %} {% block content %}
+<div class="row">
+  <div class="col-md-4 mb-4">
+    <!-- Use web placeholder image -->
+    <img
+      src="https://via.placeholder.com/500x750.png?text=Movie"
+      class="img-fluid rounded"
+      alt="{{ movie.title }}"
+    />
+  </div>
+  <div class="col-md-8">
+    <h1 class="mb-3">{{ movie.title }}</h1>
+
+    <div class="mb-3">
+      <h5 class="text-muted">Genres</h5>
+      <div class="d-flex flex-wrap">
+        {% for genre in movie.genres.split('|') %}
+        <span class="badge bg-secondary me-2 mb-2">{{ genre }}</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="mb-4">
+      <h5>Movie ID</h5>
+      <p>{{ movie.movieId }}</p>
+    </div>
+
+    <div>
+      <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Home
+      </a>
+    </div>
+  </div>
+</div>
+
+<h2 class="mt-5 mb-4">Similar Movies You Might Like</h2>
+<div class="row">
+  {% for rec in recommendations %}
+  <div class="col-md-3 mb-4">
+    <div class="card h-100">
+      <!-- Use web placeholder image -->
+      <img
+        src="https://via.placeholder.com/300x450.png?text=Movie"
+        class="card-img-top"
+        alt="{{ rec.title }}"
+      />
+      <div class="card-body">
+        <h5 class="card-title">{{ rec.title }}</h5>
+        <p class="card-text small text-muted">{{ rec.genres }}</p>
+        <div class="d-flex justify-content-between align-items-center">
+          <a
+            href="{{ url_for('movie_detail', movie_id=rec.movieId) }}"
+            class="btn btn-sm btn-outline-primary"
+            >View Details</a
+          >
+          <span class="badge bg-success"
+            >{{ "%.0f"|format(rec.similarity_score * 100) }}% match</span
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

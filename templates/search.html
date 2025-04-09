@@ -1,0 +1,44 @@
+{% extends "base.html" %} {% block title %}Search Results: {{ query }}{%
+endblock %} {% block content %}
+<h2 class="mb-4">Search Results: "{{ query }}"</h2>
+
+{% if movies %}
+<div class="row row-cols-1 row-cols-md-4 g-4">
+  {% for movie in movies %}
+  <div class="col">
+    <div class="card h-100">
+      {% if movie.tmdb_poster_url %}
+      <img
+        src="{{ movie.tmdb_poster_url }}"
+        class="card-img-top"
+        alt="{{ movie.title }}"
+        style="height: 300px; object-fit: cover"
+      />
+      {% else %}
+      <img
+        src="{{ url_for('static', filename='img/movie-placeholder.jpg') }}"
+        class="card-img-top"
+        alt="{{ movie.title }}"
+      />
+      {% endif %}
+      <div class="card-body">
+        <h5 class="card-title">{{ movie.title }}</h5>
+        <p class="card-text">{{ movie.genres }}</p>
+        {% if movie.vote_average %}
+        <p class="card-text">
+          <small class="text-muted">Rating: {{ movie.vote_average }} ⭐</small>
+        </p>
+        {% endif %}
+        <a href="/movie/{{ movie.movieId }}" class="btn btn-primary"
+          >View Details</a
+        >
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">
+  No movies found matching "{{ query }}". Try another search term.
+</div>
+{% endif %} {% endblock %}

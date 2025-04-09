@@ -1,0 +1,87 @@
+{% extends "base.html" %} {% block title %}Home - Movie Recommendations{%
+endblock %} {% block content %}
+<div class="jumbotron bg-light p-4 rounded mb-4">
+  <h1 class="display-4">Discover Your Next Favorite Movie</h1>
+  <p class="lead">
+    Browse our collection of movies and get personalized recommendations based
+    on your interests.
+  </p>
+</div>
+
+<!-- Popular Movies Section -->
+<h2 class="mb-4">Popular Movies</h2>
+<div class="row row-cols-1 row-cols-md-4 g-4 mb-5">
+  {% for movie in popular_movies %}
+  <div class="col">
+    <div class="card h-100">
+      {% if movie.tmdb_poster_url and not
+      movie.tmdb_poster_url.startswith('https://via.placeholder.com') %}
+      <img
+        src="{{ movie.tmdb_poster_url }}"
+        class="card-img-top"
+        alt="{{ movie.title }}"
+        style="height: 300px; object-fit: cover"
+        onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/movie-placeholder.jpg') }}';"
+      />
+      {% else %}
+      <img
+        src="{{ url_for('static', filename='img/movie-placeholder.jpg') }}"
+        class="card-img-top"
+        alt="{{ movie.title }}"
+        style="height: 300px; object-fit: cover"
+      />
+      {% endif %}
+      <div class="card-body">
+        <h5 class="card-title">{{ movie.title }}</h5>
+        <p class="card-text">{{ movie.genres }}</p>
+        {% if movie.vote_average %}
+        <p class="card-text">
+          <small class="text-muted">Rating: {{ movie.vote_average }} ⭐</small>
+        </p>
+        {% endif %}
+        <a href="/movie/{{ movie.movieId }}" class="btn btn-primary"
+          >View Details</a
+        >
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Top Rated Movies Section -->
+<h2 class="mb-4">Top Rated Movies</h2>
+<div class="row row-cols-1 row-cols-md-4 g-4">
+  {% for movie in top_rated_movies %}
+  <div class="col">
+    <div class="card h-100">
+      {% if movie.tmdb_poster_url %}
+      <img
+        src="{{ movie.tmdb_poster_url }}"
+        class="card-img-top"
+        alt="{{ movie.title }}"
+        style="height: 300px; object-fit: cover"
+      />
+      {% else %}
+      <img
+        src="{{ url_for('static', filename='img/movie-placeholder.jpg') }}"
+        class="card-img-top"
+        alt="{{ movie.title }}"
+      />
+      {% endif %}
+      <div class="card-body">
+        <h5 class="card-title">{{ movie.title }}</h5>
+        <p class="card-text">{{ movie.genres }}</p>
+        {% if movie.vote_average %}
+        <p class="card-text">
+          <small class="text-muted">Rating: {{ movie.vote_average }} ⭐</small>
+        </p>
+        {% endif %}
+        <a href="/movie/{{ movie.movieId }}" class="btn btn-primary"
+          >View Details</a
+        >
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

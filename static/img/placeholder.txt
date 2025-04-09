@@ -1,0 +1,7 @@
+This is a placeholder file.
+
+For a production application, you'll want to add a movie-placeholder.jpg image here.
+The image should be a generic movie poster placeholder that will be displayed for all movies
+until you have actual movie posters.
+
+Alternatively, you could use a movie poster API to dynamically fetch real movie posters. 
