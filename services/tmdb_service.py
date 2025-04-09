@@ -23,7 +23,7 @@ TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/"
 # Cache dictionary for API responses to avoid redundant requests
 # Key: endpoint_path, Value: (response_data, timestamp)
 API_CACHE = {}
-CACHE_EXPIRY_TIME = 24 * 60 * 60  # 24 hours in seconds
+CACHE_EXPIRY_TIME = 7 * 24 * 60 * 60  # One week cache instead of one day
 
 def _make_request(endpoint, params=None):
     """
@@ -105,7 +105,7 @@ def get_backdrop_url(backdrop_path, size="w1280"):
     
     return f"{TMDB_IMAGE_BASE_URL}{size}{backdrop_path}"
 
-@lru_cache(maxsize=100)
+@lru_cache(maxsize=1000)
 def search_movie_by_title(title, year=None):
     """
     Search for movies by title.
@@ -128,6 +128,7 @@ def search_movie_by_title(title, year=None):
         print(f"Error searching movie by title: {e}")
         return []
 
+@lru_cache(maxsize=1000)
 def get_movie_details(movie_id):
     """
     Get comprehensive details for a movie by its TMDb ID.

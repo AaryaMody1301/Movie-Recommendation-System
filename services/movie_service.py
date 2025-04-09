@@ -40,28 +40,34 @@ def _get_data_loader() -> DataLoader:
         DataLoader instance
     """
     try:
-        # Get paths from config
-        movies_path = current_app.config.get('MOVIES_CSV', 'data/movies.csv')
-        ratings_path = current_app.config.get('RATINGS_CSV', 'data/ratings.csv')
-        
-        # Create DataLoader
-        data_loader = DataLoader(
-            movies_path=movies_path,
-            ratings_path=ratings_path,
-            test_size=current_app.config.get('TEST_SIZE', 0.2),
-            random_state=current_app.config.get('RANDOM_STATE', 42)
-        )
-        
-        logger.info(f"DataLoader created with movies from {movies_path}")
-        return data_loader
-        
-    except Exception as e:
-        logger.error(f"Error creating DataLoader: {str(e)}")
-        # Return a basic DataLoader with default paths as fallback
-        return DataLoader(
-            movies_path='data/movies.csv',
-            ratings_path='data/ratings.csv'
-        )
+        # First, try to use the global cached loader if available
+        from app import get_cached_data_loader
+        return get_cached_data_loader()
+    except (ImportError, AttributeError):
+        try:
+            # Fallback to creating a new one based on current_app config
+            # Get paths from config
+            movies_path = current_app.config.get('MOVIES_CSV', 'data/movies.csv')
+            ratings_path = current_app.config.get('RATINGS_CSV', 'data/ratings.csv')
+            
+            # Create DataLoader
+            data_loader = DataLoader(
+                movies_path=movies_path,
+                ratings_path=ratings_path,
+                test_size=current_app.config.get('TEST_SIZE', 0.2),
+                random_state=current_app.config.get('RANDOM_STATE', 42)
+            )
+            
+            logger.info(f"DataLoader created with movies from {movies_path}")
+            return data_loader
+            
+        except Exception as e:
+            logger.error(f"Error creating DataLoader: {str(e)}")
+            # Return a basic DataLoader with default paths as fallback
+            return DataLoader(
+                movies_path='data/movies.csv',
+                ratings_path='data/ratings.csv'
+            )
 
 
 def get_all_movies(page: int = 1, per_page: int = 24, 
@@ -494,10 +500,27 @@ def enrich_movies_list(movies: List[Dict], with_tmdb: bool = True) -> List[Dict]
     if not with_tmdb:
         return movies
     
+    # Local cache for this function call to avoid enriching the same movie twice
+    # (sometimes movies can appear multiple times in a list)
+    local_cache = {}
+    
     enriched_movies = []
     for movie in movies:
         try:
+            # Use movieId as cache key
+            movie_id = movie.get('movieId')
+            if movie_id in local_cache:
+                # Use cached result
+                enriched_movies.append(local_cache[movie_id])
+                continue
+                
+            # Enrich movie
             enriched_movie = enrich_movie_with_tmdb(movie)
+            
+            # Cache the result
+            local_cache[movie_id] = enriched_movie
+            
+            # Add to result list
             enriched_movies.append(enriched_movie)
         except Exception as e:
             # Only log movie ID to avoid Unicode issues

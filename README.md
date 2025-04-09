@@ -1,18 +1,17 @@
 # Movie Recommendation System
 
-A content-based movie recommendation system built with Python, Flask, Pandas, and Scikit-learn, enhanced with The Movie Database (TMDb) API integration.
+A movie recommendation system built with Python, Flask, and machine learning techniques. The system utilizes content-based filtering and integrates with The Movie Database (TMDb) API for enhanced movie details.
 
 ## Features
 
-- **Content-Based Filtering**: Recommends movies based on genre, keywords, cast, and crew
+- **Content-Based Filtering**: Recommends movies based on genre similarity
 - **TMDb Integration**: Enriches movie data with details from The Movie Database API
-- **Enhanced Movie Details**: View posters, backdrops, cast, director, trailers, and more
+- **Movie Details**: View posters, backdrops, cast, director, and more
 - **Watch Providers**: See where to stream, rent, or buy movies (region-specific)
-- **Multiple Recommendation Methods**: Toggle between content-based and TMDb similar movies
-- **Web Interface**: Modern and responsive UI for browsing movies and recommendations
+- **Web Interface**: Responsive UI for browsing movies and recommendations
 - **Search Functionality**: Search for movies by title
 - **Genre Filtering**: Browse movies by genre
-- **Detailed Movie Pages**: View movie details and similar recommendations
+- **Performance Optimized**: Caching and efficient data loading
 
 ## Requirements
 
@@ -21,16 +20,10 @@ A content-based movie recommendation system built with Python, Flask, Pandas, an
 - Pandas
 - NumPy
 - Scikit-learn
-- Werkzeug
-- Flask-WTF
-
-## Dataset
-
-The system primarily uses a `movies.csv` dataset with the following structure:
-
-- `movieId`: Unique identifier for each movie
-- `title`: Movie title (with year)
-- `genres`: Pipe-separated list of genres for each movie
+- Flask-SQLAlchemy
+- Flask-Login
+- Python-dotenv
+- Requests
 
 ## Installation
 
@@ -40,18 +33,26 @@ The system primarily uses a `movies.csv` dataset with the following structure:
    cd movie-recommendation-system
    ```
 
-2. Install required packages:
+2. Create and activate a virtual environment:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. Install required packages:
    ```
    pip install -r requirements.txt
    ```
-
-3. Make sure your `movies.csv` file is in the project root directory
 
 4. Create a `.env` file based on `.env.example` and add your TMDb API key:
    ```
    TMDB_API_KEY=your_tmdb_api_key_here
    ```
-   You can obtain a TMDb API key by creating an account at [https://www.themoviedb.org/](https://www.themoviedb.org/) and requesting an API key from your account settings.
+   You can obtain a TMDb API key by creating an account at [https://www.themoviedb.org/](https://www.themoviedb.org/) and requesting an API key.
+
+5. Place your dataset files in the data directory:
+   - `data/movies.csv`: Movie information
+   - `data/ratings.csv`: User ratings (optional)
 
 ## Running the Application
 
@@ -65,39 +66,56 @@ The system primarily uses a `movies.csv` dataset with the following structure:
    http://127.0.0.1:5000/
    ```
 
-## How It Works
-
-1. **Data Loading**: The system loads movie data from `movies.csv` when the application starts
-2. **TMDb Enrichment**: Movie data is enriched with information from The Movie Database API
-3. **Enhanced TF-IDF Vectorization**: Movie genres, keywords, cast, and crew are converted to TF-IDF vectors
-4. **Similarity Calculation**: Cosine similarity is calculated between movie vectors
-5. **Multiple Recommendation Sources**: The system provides both content-based recommendations and TMDb API similar movie suggestions
-6. **Caching**: TMDb API responses are cached to improve performance and respect rate limits
-
-## TMDb Integration Features
-
-- **Movie Posters and Backdrops**: High-quality images for each movie
-- **Detailed Information**: Overview, release date, runtime, rating, etc.
-- **Cast and Crew**: Main actors and director for each movie
-- **Keywords**: Associated keywords for better recommendation
-- **Trailers**: YouTube trailers when available
-- **Watch Providers**: Where to stream, rent, or buy (region-specific)
-- **Similar Movies**: TMDb's algorithmic similar movie recommendations
-
 ## Project Structure
 
-- `app.py`: Main Flask application
-- `recommendation.py`: Core recommendation engine
-- `services/tmdb_service.py`: TMDb API integration service
-- `templates/`: HTML templates for the web interface
-- `static/`: Static files (CSS, JavaScript, images)
-- `requirements.txt`: Required Python packages
-- `.env.example`: Example environment variables file
-- `README.md`: Project documentation
+```
+movie-recommendation-system/
+│
+├── app/                             # Application package
+│   ├── __init__.py                  # App initialization
+│   ├── models/                      # Database models
+│   ├── blueprints/                  # Flask route blueprints
+│   ├── services/                    # Business logic services
+│   ├── database/                    # Database configuration
+│   ├── static/                      # Static assets
+│   └── templates/                   # Jinja2 templates
+│
+├── data/                            # Data files and processing
+│   ├── movies.csv                   # Movie dataset
+│   ├── ratings.csv                  # Ratings dataset
+│   └── data_loader.py               # Data loading utilities
+│
+├── ml/                              # Machine learning components
+│   ├── content_based.py             # Content-based filtering
+│   ├── collaborative.py             # Collaborative filtering (future)
+│   └── utils.py                     # ML utilities
+│
+├── config.py                        # Configuration settings
+├── run.py                           # Development server script
+├── wsgi.py                          # WSGI entry point for production
+│
+├── requirements.txt                 # Project dependencies
+├── README.md                        # Project documentation
+├── LICENSE                          # License file
+└── .env.example                     # Example environment variables
+```
+
+## How It Works
+
+1. **Data Loading**: The system loads movie data from CSV files
+2. **TF-IDF Vectorization**: Movie genres are converted to TF-IDF vectors
+3. **Similarity Calculation**: Cosine similarity finds movies with similar features
+4. **TMDb Enhancement**: Data is enriched with TMDb API information
+5. **Caching**: API responses are cached to improve performance
 
 ## Future Enhancements
 
 - Add collaborative filtering for user-based recommendations
-- Incorporate additional movie metadata (directors, actors, plot)
 - Implement user accounts and personalized recommendations
-- Add movie ratings and reviews 
+- Add movie ratings and reviews functionality
+- Improve recommendation algorithms with deep learning
+- Add API endpoints for mobile apps
+
+## License
+
+MIT 
