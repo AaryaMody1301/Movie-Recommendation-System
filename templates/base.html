@@ -10,13 +10,49 @@
     />
     <link
       rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"
+    />
+    <link
+      rel="stylesheet"
       href="{{ url_for('static', filename='css/styles.css') }}"
     />
     {% block extra_css %}{% endblock %}
+    <style>
+      /* Visually hidden for accessibility */
+      .visually-hidden {
+        position: absolute !important;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+      }
+      /* Spinner overlay */
+      #loading-spinner-overlay {
+        display: none;
+        position: fixed;
+        z-index: 2000;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(30, 30, 30, 0.5);
+        align-items: center;
+        justify-content: center;
+      }
+      #loading-spinner-overlay.active {
+        display: flex;
+      }
+    </style>
   </head>
   <body>
     <!-- Navigation Bar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <nav
+      class="navbar navbar-expand-lg navbar-dark bg-dark"
+      aria-label="Main navigation"
+    >
       <div class="container">
         <a class="navbar-brand" href="/">Movie Recommendations</a>
         <button
@@ -24,6 +60,9 @@
           type="button"
           data-bs-toggle="collapse"
           data-bs-target="#navbarNav"
+          aria-controls="navbarNav"
+          aria-expanded="false"
+          aria-label="Toggle navigation"
         >
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -38,6 +77,7 @@
                 href="#"
                 role="button"
                 data-bs-toggle="dropdown"
+                aria-expanded="false"
               >
                 Genres
               </a>
@@ -52,18 +92,55 @@
               </ul>
             </li>
           </ul>
-          <form class="d-flex" action="/search" method="get">
+          <form
+            class="d-flex"
+            action="/search"
+            method="get"
+            role="search"
+            aria-label="Site search"
+          >
             <input
               class="form-control me-2"
               type="search"
               name="query"
               placeholder="Search movies..."
+              aria-label="Search movies"
             />
             <button class="btn btn-outline-light" type="submit">Search</button>
           </form>
         </div>
       </div>
     </nav>
+
+    <!-- Flash messages -->
+    <div class="container mt-3">
+      {% with messages = get_flashed_messages(with_categories=true) %} {% if
+      messages %} {% for category, message in messages %}
+      <div
+        class="alert alert-{{ category }} alert-dismissible fade show animate__animated animate__fadeInDown"
+        role="alert"
+      >
+        {{ message }}
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+          aria-label="Close"
+        ></button>
+      </div>
+      {% endfor %} {% endif %} {% endwith %}
+    </div>
+
+    <!-- Loading Spinner Overlay -->
+    <div id="loading-spinner-overlay" aria-live="polite" aria-busy="true">
+      <div
+        class="spinner-border text-warning"
+        style="width: 4rem; height: 4rem"
+        role="status"
+      >
+        <span class="visually-hidden">Loading...</span>
+      </div>
+    </div>
 
     <!-- Main Content -->
     <main class="container my-4">{% block content %}{% endblock %}</main>
@@ -86,6 +163,35 @@
     <!-- JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+      // Show spinner on form submit or link click (for slow ops)
+      document.addEventListener("DOMContentLoaded", function () {
+        function showSpinner() {
+          document
+            .getElementById("loading-spinner-overlay")
+            .classList.add("active");
+        }
+        function hideSpinner() {
+          document
+            .getElementById("loading-spinner-overlay")
+            .classList.remove("active");
+        }
+        // Show spinner on all form submits
+        document.querySelectorAll("form").forEach((form) => {
+          form.addEventListener("submit", function () {
+            showSpinner();
+          });
+        });
+        // Show spinner on all .show-spinner links
+        document.querySelectorAll("a.show-spinner").forEach((link) => {
+          link.addEventListener("click", function () {
+            showSpinner();
+          });
+        });
+        // Hide spinner on page load
+        hideSpinner();
+      });
+    </script>
     {% block extra_js %}{% endblock %}
   </body>
 </html>

@@ -1,31 +1,44 @@
 {% extends "base.html" %} {% block title %}Home - Movie Recommendations{%
-endblock %} {% block head %} {{ super() }}
+endblock %} {% block head %}{{ super() }}
 <link
   rel="stylesheet"
   href="{{ url_for('static', filename='css/movie-placeholder.css') }}"
 />
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+/>
 {% endblock %} {% block content %}
-<div class="jumbotron bg-light p-4 rounded mb-4">
-  <h1 class="display-4">Discover Your Next Favorite Movie</h1>
-  <p class="lead">
-    Browse our collection of movies and get personalized recommendations based
+<div
+  class="jumbotron bg-gradient p-4 rounded mb-4 text-center shadow-lg animate__animated animate__fadeInDown"
+>
+  <h1 class="display-3 fw-bold mb-3">
+    <i class="bi bi-film"></i> Discover Your Next Favorite Movie
+  </h1>
+  <p class="lead mb-4">
+    Browse our collection and get
+    <span class="fw-bold text-warning">personalized recommendations</span> based
     on your interests.
   </p>
+  <a href="#popular" class="btn btn-primary btn-lg shadow show-spinner"
+    >Get Started <i class="bi bi-arrow-right-circle ms-2"></i
+  ></a>
 </div>
 
 <!-- Popular Movies Section -->
-<h2 class="mb-4">Popular Movies</h2>
+<h2 class="mb-4" id="popular">
+  <i class="bi bi-star-fill text-warning"></i> Popular Movies
+</h2>
 <div class="row row-cols-1 row-cols-md-4 g-4 mb-5">
   {% for movie in popular_movies %}
   <div class="col">
-    <div class="card h-100">
+    <div class="card h-100 shadow animate__animated animate__zoomIn">
       {% if movie.tmdb_poster_url and not
       movie.tmdb_poster_url.startswith('https://via.placeholder.com') %}
       <img
         src="{{ movie.tmdb_poster_url }}"
         class="card-img-top"
         alt="{{ movie.title }}"
-        style="height: 300px; object-fit: cover"
         onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/movie-placeholder.jpg') }}';"
       />
       {% else %}
@@ -37,15 +50,24 @@ endblock %} {% block head %} {{ super() }}
         </div>
       </div>
       {% endif %}
-      <div class="card-body">
+      <div class="card-body d-flex flex-column">
         <h5 class="card-title">{{ movie.title }}</h5>
-        <p class="card-text">{{ movie.genres }}</p>
+        <p class="card-text">
+          {% for genre in movie.genres.split('|') %}<span class="genre-badge"
+            >{{ genre }}</span
+          >{% endfor %}
+        </p>
         {% if movie.vote_average %}
         <p class="card-text">
-          <small class="text-muted">Rating: {{ movie.vote_average }} ⭐</small>
+          <small class="text-muted"
+            ><i class="bi bi-star-fill text-warning"></i> {{ movie.vote_average
+            }}</small
+          >
         </p>
         {% endif %}
-        <a href="/movie/{{ movie.movieId }}" class="btn btn-primary"
+        <a
+          href="/movie/{{ movie.movieId }}"
+          class="btn btn-primary w-100 mt-auto show-spinner"
           >View Details</a
         >
       </div>
@@ -55,18 +77,19 @@ endblock %} {% block head %} {{ super() }}
 </div>
 
 <!-- Top Rated Movies Section -->
-<h2 class="mb-4">Top Rated Movies</h2>
+<h2 class="mb-4">
+  <i class="bi bi-trophy-fill text-warning"></i> Top Rated Movies
+</h2>
 <div class="row row-cols-1 row-cols-md-4 g-4">
   {% for movie in top_rated_movies %}
   <div class="col">
-    <div class="card h-100">
+    <div class="card h-100 shadow animate__animated animate__zoomIn">
       {% if movie.tmdb_poster_url and not
       movie.tmdb_poster_url.startswith('https://via.placeholder.com') %}
       <img
         src="{{ movie.tmdb_poster_url }}"
         class="card-img-top"
         alt="{{ movie.title }}"
-        style="height: 300px; object-fit: cover"
         onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/movie-placeholder.jpg') }}';"
       />
       {% else %}
@@ -78,15 +101,24 @@ endblock %} {% block head %} {{ super() }}
         </div>
       </div>
       {% endif %}
-      <div class="card-body">
+      <div class="card-body d-flex flex-column">
         <h5 class="card-title">{{ movie.title }}</h5>
-        <p class="card-text">{{ movie.genres }}</p>
+        <p class="card-text">
+          {% for genre in movie.genres.split('|') %}<span class="genre-badge"
+            >{{ genre }}</span
+          >{% endfor %}
+        </p>
         {% if movie.vote_average %}
         <p class="card-text">
-          <small class="text-muted">Rating: {{ movie.vote_average }} ⭐</small>
+          <small class="text-muted"
+            ><i class="bi bi-star-fill text-warning"></i> {{ movie.vote_average
+            }}</small
+          >
         </p>
         {% endif %}
-        <a href="/movie/{{ movie.movieId }}" class="btn btn-primary"
+        <a
+          href="/movie/{{ movie.movieId }}"
+          class="btn btn-primary w-100 mt-auto show-spinner"
           >View Details</a
         >
       </div>

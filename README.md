@@ -36,7 +36,8 @@ A movie recommendation system built with Python, Flask, and machine learning tec
 2. Create and activate a virtual environment:
    ```
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   .\venv\Scripts\activate  # On Windows: venv\Scripts\activate
+   # or on Unix/Mac: source venv/bin/activate
    ```
 
 3. Install required packages:
@@ -44,15 +45,44 @@ A movie recommendation system built with Python, Flask, and machine learning tec
    pip install -r requirements.txt
    ```
 
-4. Create a `.env` file based on `.env.example` and add your TMDb API key:
+4. Copy the example environment file and edit as needed:
    ```
-   TMDB_API_KEY=your_tmdb_api_key_here
+   copy .env.example .env  # On Windows
+   # or
+   cp .env.example .env    # On Unix/Mac
    ```
-   You can obtain a TMDb API key by creating an account at [https://www.themoviedb.org/](https://www.themoviedb.org/) and requesting an API key.
+   Edit `.env` and set your TMDB_API_KEY and any other secrets or settings. See below for details.
 
 5. Place your dataset files in the data directory:
    - `data/movies.csv`: Movie information
    - `data/ratings.csv`: User ratings (optional)
+
+## Environment Variables
+
+All secrets and configuration are loaded from `.env`. See `.env.example` for all options. Key variables:
+
+| Variable           | Description                                                      |
+|--------------------|------------------------------------------------------------------|
+| FLASK_APP          | Flask entry point (default: app.py)                              |
+| FLASK_ENV          | Flask environment (development/production)                       |
+| SECRET_KEY         | Flask secret key (set a strong value in production)              |
+| DATABASE_URI       | SQLAlchemy DB URI                                                |
+| MOVIES_CSV         | Path to movies CSV                                               |
+| RATINGS_CSV        | Path to ratings CSV                                              |
+| CONTENT_MODEL_PATH | Path to save/load content-based model                            |
+| COLLAB_MODEL_PATH  | Path to save/load collaborative model                            |
+| MAX_RECOMMENDATIONS| Default number of recommendations to show                        |
+| CONTENT_WEIGHT     | Weight for content-based recommendations in hybrid (0.0-1.0)     |
+| COLLAB_WEIGHT      | Weight for collaborative recommendations in hybrid (0.0-1.0)     |
+| TEST_SIZE          | Fraction of data for test split                                  |
+| RANDOM_STATE       | Random seed for reproducibility                                  |
+| N_FACTORS          | Number of latent factors for collaborative filtering             |
+| TRANSFORMER_MODEL  | HuggingFace model name or path for content-based filtering       |
+| TMDB_API_KEY       | TMDb API key (get from https://www.themoviedb.org/settings/api)  |
+| LOG_LEVEL          | Logging level (INFO, DEBUG, etc.)                                |
+| CACHE_TYPE         | Flask-Caching backend (SimpleCache, RedisCache, etc.)            |
+| CACHE_DEFAULT_TIMEOUT | Cache timeout in seconds                                      |
+| UPLOAD_FOLDER      | Folder for user uploads                                          |
 
 ## Running the Application
 
@@ -118,4 +148,4 @@ movie-recommendation-system/
 
 ## License
 
-MIT 
+MIT

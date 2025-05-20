@@ -26,3 +26,7 @@ click
 joblib
 requests
 tmdbv3api
+
+# For development/testing
+pytest
+coverage

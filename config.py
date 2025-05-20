@@ -13,6 +13,13 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URI', 'sqlite:///instance/movie_recommender.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
+    # Cache settings
+    CACHE_TYPE = os.environ.get('CACHE_TYPE', 'SimpleCache')
+    CACHE_DEFAULT_TIMEOUT = 300
+    
+    # Upload folder for user avatars or other files
+    UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'instance/uploads')
+    
     # File paths
     MOVIES_CSV = os.environ.get('MOVIES_CSV', 'data/movies.csv')
     RATINGS_CSV = os.environ.get('RATINGS_CSV', 'data/ratings.csv')

@@ -1,7 +1,7 @@
 """
 Movies blueprint for browsing and searching movies.
 """
-from flask import Blueprint, render_template, request, jsonify, abort
+from flask import Blueprint, render_template, request, jsonify, abort, flash
 from services.movie_service import (
     get_all_movies, 
     get_movie_by_id, 
@@ -33,11 +33,15 @@ def browse():
             genre, page=page, per_page=per_page, 
             sort_by=sort_by, sort_order=sort_order
         )
+        if total == 0:
+            flash(f'No movies found in the "{genre}" genre.', 'info')
     else:
         movies_data, total = get_all_movies(
             page=page, per_page=per_page, 
             sort_by=sort_by, sort_order=sort_order
         )
+        if total == 0:
+            flash('No movies found.', 'info')
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
@@ -65,7 +69,8 @@ def movie_detail(movie_id):
     movie = get_movie_by_id(movie_id)
     
     if not movie:
-        abort(404)
+        flash('Movie not found.', 'warning')
+        return render_template('movies/detail.html', movie=None), 404
     
     # Split genres for display
     movie['genres_list'] = movie['genres'].split('|') if movie['genres'] else []
@@ -85,6 +90,8 @@ def genre(genre):
     
     # Get movies by genre with pagination
     movies_data, total = get_movies_by_genre(genre, page=page, per_page=per_page)
+    if total == 0:
+        flash(f'No movies found in the "{genre}" genre.', 'info')
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
@@ -106,6 +113,7 @@ def search():
     query = request.args.get('query', '')
     
     if not query:
+        flash('Please enter a search term.', 'info')
         return render_template('movies/search.html', query='', movies=[], total=0)
     
     # Pagination parameters
@@ -114,6 +122,8 @@ def search():
     
     # Search movies with pagination
     movies_data, total = search_movies(query, page=page, per_page=per_page)
+    if total == 0:
+        flash(f'No movies found matching "{query}". Try another search term.', 'info')
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
@@ -152,4 +162,4 @@ def api_search():
         for movie in movies_data
     ]
     
-    return jsonify(result) 
+    return jsonify(result)

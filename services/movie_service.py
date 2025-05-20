@@ -9,18 +9,56 @@ import os
 import pandas as pd
 import numpy as np
 import re
-from typing import List, Dict, Optional, Tuple, Any
-from flask import current_app
-from data.data_loader import DataLoader
+from typing import List, Dict, Optional, Tuple, Any, Callable
+from flask import current_app, g
+# from recommendation import ContentBasedRecommender # Old import
+from models.content_based import ContentBasedRecommender # Import the SentenceTransformer recommender
 from services.tmdb_service import (
     find_tmdb_id_for_movie, 
     get_movie_details, 
     get_watch_providers,
-    get_similar_movies
+    get_similar_movies as get_tmdb_similar_movies_api # Renamed to avoid conflict
 )
 
 # Setup logger
 logger = logging.getLogger(__name__)
+
+# Import cache object from app
+cache = None
+
+def set_cache(cache_obj):
+    """Set the cache object from the Flask app."""
+    global cache
+    cache = cache_obj
+
+# Define a cache decorator fallback for when cache is None
+def memoize_or_pass_through(timeout=300):
+    """
+    Decorator that will use cache.memoize if available, otherwise just return the original function.
+    This handles the case when cache is None.
+    """
+    def decorator(func):
+        if cache is not None:
+            return cache.memoize(timeout=timeout)(func)
+        else:
+            return func
+    return decorator
+
+# DataLoader singleton for fast access
+_DATA_LOADER = None
+
+def get_data_loader():
+    global _DATA_LOADER
+    if _DATA_LOADER is None:
+        from data.data_loader import DataLoader
+        _DATA_LOADER = DataLoader(
+            movies_path=os.environ.get('MOVIES_CSV', 'data/movies.csv'),
+            ratings_path=os.environ.get('RATINGS_CSV', 'data/ratings.csv')
+        )
+    return _DATA_LOADER
+
+# Global instance for the recommender
+_RECOMMENDER = None
 
 # Dictionary to cache TMDb IDs (movieId -> tmdb_id)
 _TMDB_ID_CACHE = {}
@@ -32,43 +70,18 @@ def _extract_year_from_title(title):
         return int(year_match.group(1))
     return None
 
-def _get_data_loader() -> DataLoader:
-    """
-    Get or create a DataLoader instance.
-    
-    Returns:
-        DataLoader instance
-    """
-    try:
-        # First, try to use the global cached loader if available
-        from app import get_cached_data_loader
-        return get_cached_data_loader()
-    except (ImportError, AttributeError):
-        try:
-            # Fallback to creating a new one based on current_app config
-            # Get paths from config
-            movies_path = current_app.config.get('MOVIES_CSV', 'data/movies.csv')
-            ratings_path = current_app.config.get('RATINGS_CSV', 'data/ratings.csv')
-            
-            # Create DataLoader
-            data_loader = DataLoader(
-                movies_path=movies_path,
-                ratings_path=ratings_path,
-                test_size=current_app.config.get('TEST_SIZE', 0.2),
-                random_state=current_app.config.get('RANDOM_STATE', 42)
-            )
-            
-            logger.info(f"DataLoader created with movies from {movies_path}")
-            return data_loader
-            
-        except Exception as e:
-            logger.error(f"Error creating DataLoader: {str(e)}")
-            # Return a basic DataLoader with default paths as fallback
-            return DataLoader(
-                movies_path='data/movies.csv',
-                ratings_path='data/ratings.csv'
-            )
+def _get_data_loader():
+    return get_data_loader()
 
+def _get_recommender() -> Optional[ContentBasedRecommender]:
+    """
+    Get the ContentBasedRecommender instance from Flask's g object.
+    It should be initialized in create_app.
+    """
+    if 'recommender' not in g:
+        logger.error("ContentBasedRecommender not found in g. It should be initialized in create_app.")
+        return None
+    return g.recommender
 
 def get_all_movies(page: int = 1, per_page: int = 24, 
                    sort_by: str = 'title', sort_order: str = 'asc') -> Tuple[List[Dict], int]:
@@ -209,31 +222,43 @@ def get_movies_by_genre(genre: str, page: int = 1, per_page: int = 24,
         Tuple of (list of movie dictionaries, total count)
     """
     try:
-        # Get DataLoader
         data_loader = _get_data_loader()
         
-        # Get movies by genre
-        genre_movies = data_loader.get_movies_by_genre(genre)
+        # Get movies by genre using DataLoader method
+        genre_movies_df = data_loader.get_movies_by_genre(genre)
         
-        # Apply sorting
+        # Apply sorting (handle potential missing columns)
         sort_ascending = sort_order.lower() != 'desc'
         
-        if sort_by == 'year' and 'year' in genre_movies.columns:
-            genre_movies = genre_movies.sort_values('year', ascending=sort_ascending)
-        elif sort_by == 'rating' and 'vote_average' in genre_movies.columns:
-            genre_movies = genre_movies.sort_values('vote_average', ascending=sort_ascending)
+        # Determine the actual column name for sorting rating (could be avg_rating etc.)
+        rating_col = None
+        if sort_by == 'rating':
+            if 'average_rating' in genre_movies_df.columns:
+                rating_col = 'average_rating'
+            elif 'avg_rating' in genre_movies_df.columns:
+                rating_col = 'avg_rating'
+            # Add more potential rating column names if needed
+
+        if sort_by == 'year' and 'year' in genre_movies_df.columns:
+            genre_movies_df = genre_movies_df.sort_values('year', ascending=sort_ascending, na_position='last')
+        elif rating_col:
+            genre_movies_df = genre_movies_df.sort_values(rating_col, ascending=sort_ascending, na_position='last')
         else:  # Default to title
-            genre_movies = genre_movies.sort_values('title', ascending=sort_ascending)
-        
-        # Get total count
-        total = len(genre_movies)
-        
+            # Ensure title column exists before sorting
+            if 'title' in genre_movies_df.columns:
+                 genre_movies_df = genre_movies_df.sort_values('title', ascending=sort_ascending, na_position='last')
+            else:
+                 logger.warning("Cannot sort by title: 'title' column missing.")
+
+        # Get total count before pagination
+        total = len(genre_movies_df)
+
         # Apply pagination
         offset = (page - 1) * per_page
-        genre_movies = genre_movies.iloc[offset:offset + per_page]
+        genre_movies_df = genre_movies_df.iloc[offset:offset + per_page]
         
         # Convert to list of dictionaries
-        movies_list = genre_movies.to_dict('records')
+        movies_list = genre_movies_df.to_dict('records')
         
         return movies_list, total
         
@@ -242,6 +267,7 @@ def get_movies_by_genre(genre: str, page: int = 1, per_page: int = 24,
         return [], 0
 
 
+@memoize_or_pass_through(timeout=3600) # Cache popular movies for 1 hour
 def get_popular_movies(limit: int = 10) -> List[Dict]:
     """
     Get popular movies based on number of ratings or other popularity metrics.
@@ -253,25 +279,18 @@ def get_popular_movies(limit: int = 10) -> List[Dict]:
         List of movie dictionaries
     """
     try:
-        # Get DataLoader
         data_loader = _get_data_loader()
-        
-        # Get popular movies
-        popular_movies = data_loader.get_popular_movies(n=limit)
-        
-        # Convert to list of dictionaries
-        movies_list = popular_movies.to_dict('records')
-        
-        return movies_list
-        
+        popular_movies_df = data_loader.get_popular_movies(n=limit)
+        return popular_movies_df.to_dict('records')
     except Exception as e:
         logger.error(f"Error getting popular movies: {str(e)}")
         return []
 
 
+@memoize_or_pass_through(timeout=3600) # Cache high-rated movies for 1 hour
 def get_high_rated_movies(limit: int = 10, min_ratings: int = 10) -> List[Dict]:
     """
-    Get highly rated movies with a minimum number of ratings.
+    Get high-rated movies based on average rating and minimum rating count.
     
     Args:
         limit: Maximum number of movies to return
@@ -281,20 +300,37 @@ def get_high_rated_movies(limit: int = 10, min_ratings: int = 10) -> List[Dict]:
         List of movie dictionaries
     """
     try:
-        # Get DataLoader
         data_loader = _get_data_loader()
-        
-        # Get high rated movies
-        high_rated_movies = data_loader.get_high_rated_movies(min_ratings=min_ratings, n=limit)
-        
-        # Convert to list of dictionaries
-        movies_list = high_rated_movies.to_dict('records')
-        
-        return movies_list
-        
+        high_rated_movies_df = data_loader.get_high_rated_movies(min_ratings=min_ratings, n=limit)
+        return high_rated_movies_df.to_dict('records')
     except Exception as e:
-        logger.error(f"Error getting high rated movies: {str(e)}")
+        logger.error(f"Error getting high-rated movies: {str(e)}")
         return []
+
+
+@memoize_or_pass_through(timeout=600) # Cache recommendations for 10 minutes
+def get_content_recommendations(movie_id: int, top_n: int = 10) -> List[Dict]:
+    """
+    Get content-based movie recommendations using the fitted recommender.
+    If no recommendations are found, return fallback popular movies.
+    """
+    recommender = _get_recommender()
+    if not recommender:
+        logger.error("ContentBasedRecommender is not available.")
+        return get_popular_movies(top_n)
+
+    try:
+        recommendations = recommender.get_recommendations(movie_id, top_n=top_n)
+        if not recommendations:
+            logger.info(f"No content-based recommendations for movie {movie_id}, returning fallback popular movies.")
+            return get_popular_movies(top_n)
+        return recommendations
+    except ValueError as ve:
+        logger.warning(f"Could not get recommendations for movie ID {movie_id}: {ve}")
+        return get_popular_movies(top_n)
+    except Exception as e:
+        logger.error(f"Error getting content recommendations for movie ID {movie_id}: {str(e)}", exc_info=True)
+        return get_popular_movies(top_n)
 
 
 def update_movie_metadata(movie_id: int, metadata: Dict[str, Any]) -> bool:
@@ -459,36 +495,27 @@ def get_tmdb_similar_movies(movie_id: int, limit: int = 10) -> List[Dict]:
     Get similar movies from TMDb API.
     
     Args:
-        movie_id: Movie ID
-        limit: Maximum number of similar movies to return
+        movie_id: The *TMDb* ID of the movie (Note: Not the local movieId).
+        limit: Number of similar movies to return.
         
     Returns:
-        List of similar movies
+        List of similar movie dictionaries from TMDb.
     """
     try:
-        # Get movie first
-        movie = get_movie_by_id(movie_id, with_tmdb=False)
+        # Directly call the renamed TMDb API function with the correct parameter name (max_results)
+        similar_movies_raw = get_tmdb_similar_movies_api(movie_id, max_results=limit)
         
-        if not movie:
-            return []
+        # Optional: Process/format the raw TMDb results if needed
+        # For now, return as is
+        return similar_movies_raw
         
-        # Get TMDb ID
-        tmdb_id = get_tmdb_id_for_movie(movie)
-        
-        if not tmdb_id:
-            return []
-        
-        # Get similar movies from TMDb
-        similar_movies = get_similar_movies(tmdb_id, max_results=limit)
-        
-        return similar_movies
     except Exception as e:
-        logger.error(f"Error getting TMDb similar movies for {movie_id}: {str(e)}")
+        logger.error(f"Error getting TMDb similar movies for TMDb ID {movie_id}: {str(e)}")
         return []
 
 def enrich_movies_list(movies: List[Dict], with_tmdb: bool = True) -> List[Dict]:
     """
-    Enrich a list of movies with TMDb data.
+    Enrich a list of movie dictionaries, optionally with TMDb data.
     
     Args:
         movies: List of movie dictionaries
@@ -497,6 +524,10 @@ def enrich_movies_list(movies: List[Dict], with_tmdb: bool = True) -> List[Dict]
     Returns:
         List of enriched movie dictionaries
     """
+    # Handle empty list or None
+    if not movies:
+        return []
+        
     if not with_tmdb:
         return movies
     
@@ -507,25 +538,87 @@ def enrich_movies_list(movies: List[Dict], with_tmdb: bool = True) -> List[Dict]
     enriched_movies = []
     for movie in movies:
         try:
+            # Skip None or invalid movies
+            if not movie or not isinstance(movie, dict):
+                logger.warning("Skipping invalid movie object in enrich_movies_list")
+                continue
+
             # Use movieId as cache key
             movie_id = movie.get('movieId')
+            if not movie_id:
+                enriched_movies.append(movie)
+                continue
+
             if movie_id in local_cache:
-                # Use cached result
                 enriched_movies.append(local_cache[movie_id])
                 continue
-                
+
             # Enrich movie
             enriched_movie = enrich_movie_with_tmdb(movie)
-            
+
+            # Ensure a valid poster URL is always set
+            if not enriched_movie.get('tmdb_poster_url') or not enriched_movie['tmdb_poster_url'].startswith('http'):
+                # Use local static placeholder if available
+                enriched_movie['tmdb_poster_url'] = '/static/img/movie-placeholder.jpg'
+
             # Cache the result
             local_cache[movie_id] = enriched_movie
-            
-            # Add to result list
             enriched_movies.append(enriched_movie)
         except Exception as e:
-            # Only log movie ID to avoid Unicode issues
             logger.error(f"Error enriching movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
-            # Add the original movie to the list on error
-            enriched_movies.append(movie)
+            if movie:
+                enriched_movies.append(movie)
+    return enriched_movies
+
+# Make unique genre list cachable
+@memoize_or_pass_through(timeout=86400) # Cache genres for 1 day
+def get_unique_genres() -> List[str]:
+    """
+    Get a list of all unique genres in the dataset.
     
-    return enriched_movies 
+    Returns:
+        List of unique genre strings
+    """
+    try:
+        data_loader = _get_data_loader()
+        return data_loader.get_unique_genres()
+    except Exception as e:
+        logger.error(f"Error getting unique genres: {str(e)}")
+        return [] 
+
+def find_local_id_from_tmdb_id(tmdb_id: int) -> Optional[int]:
+    """
+    Find the local movie ID based on a TMDb ID.
+    
+    Args:
+        tmdb_id: The TMDb ID to look up
+        
+    Returns:
+        The local movieId if found, None otherwise
+    """
+    try:
+        data_loader = _get_data_loader()
+        movies_df = data_loader.get_movies()
+        
+        # Check if 'tmdb_id' column exists - if using our enriched dataframe
+        if 'tmdb_id' in movies_df.columns:
+            movie = movies_df[movies_df['tmdb_id'] == tmdb_id]
+            if not movie.empty:
+                return int(movie.iloc[0]['movieId'])
+        
+        # Otherwise try to find the movie by searching through enriched movies
+        # This is more expensive as it has to enrich all movies
+        # We'll limit to a sample of movies to make it more efficient
+        sample_size = min(1000, len(movies_df))
+        sample_df = movies_df.sample(sample_size)
+        
+        for _, row in sample_df.iterrows():
+            movie_dict = row.to_dict()
+            enriched = enrich_movie_with_tmdb(movie_dict)
+            if enriched.get('tmdb_id') == tmdb_id:
+                return int(enriched['movieId'])
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error finding local ID for TMDb ID {tmdb_id}: {str(e)}")
+        return None

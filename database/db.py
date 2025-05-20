@@ -91,11 +91,29 @@ db = SQLAlchemyStub()
 def get_db():
     """Get a database connection for the current request."""
     if 'db' not in g:
-        g.db = sqlite3.connect(
-            current_app.config['DATABASE'],
-            detect_types=sqlite3.PARSE_DECLTYPES
-        )
-        g.db.row_factory = sqlite3.Row
+        # Extract database path from SQLAlchemy URI if it's a SQLite connection
+        db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        
+        if db_uri.startswith('sqlite:///'):
+            # Extract the path part for SQLite
+            db_path = db_uri.replace('sqlite:///', '')
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+            
+            g.db = sqlite3.connect(
+                db_path,
+                detect_types=sqlite3.PARSE_DECLTYPES
+            )
+            g.db.row_factory = sqlite3.Row
+        else:
+            # Fallback to in-memory database
+            g.db = sqlite3.connect(
+                ':memory:',
+                detect_types=sqlite3.PARSE_DECLTYPES
+            )
+            g.db.row_factory = sqlite3.Row
+            print(f"Warning: Using in-memory SQLite database as fallback. URI was: {db_uri}")
 
     return g.db
 
@@ -110,18 +128,33 @@ def close_db(e=None):
 
 def init_db(app=None):
     """Initialize the database with the schema."""
-    with app.app_context():
-        db = get_db()
-        
-        # Check if tables already exist
-        cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        if cursor.fetchone() is None:
-            # Execute schema from SQL file
-            with current_app.open_resource('schema.sql') as f:
-                db.executescript(f.read().decode('utf8'))
-                print("Database initialized with schema.sql")
-        else:
-            print("Database tables already exist, skipping initialization")
+    try:
+        if not app:
+            from flask import current_app
+            app = current_app
+            
+        with app.app_context():
+            db = get_db()
+            
+            # Check if tables already exist
+            cursor = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if cursor.fetchone() is None:
+                # Execute schema from SQL file
+                try:
+                    with app.open_resource('schema.sql') as f:
+                        db.executescript(f.read().decode('utf8'))
+                        db.commit()
+                        print("Database initialized with schema.sql")
+                except FileNotFoundError:
+                    print("schema.sql not found. Database initialization skipped.")
+                except Exception as e:
+                    print(f"Error initializing database: {e}")
+                    db.rollback()
+            else:
+                print("Database tables already exist, skipping initialization")
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+        # Don't raise, just log the error to avoid crashing app startup
 
 
 @click.command('init-db')

@@ -248,20 +248,17 @@ class DataLoader:
         
         Args:
             query: Search query.
-            limit: Maximum number of results.
+            limit: Maximum number of results to return.
             
         Returns:
-            DataFrame of matching movies.
+            DataFrame with matching movies.
         """
         if self.movies_df is None:
             raise ValueError("Movies data not loaded")
         
-        # Search in clean_title and title
-        mask = (
-            self.movies_df['clean_title'].str.contains(query, case=False) | 
-            self.movies_df['title'].str.contains(query, case=False)
-        )
-        return self.movies_df[mask].head(limit)
+        # Case-insensitive search on title
+        matching_movies = self.movies_df[self.movies_df['title'].str.contains(query, case=False, na=False)]
+        return matching_movies.head(limit)
     
     def get_movies_by_genre(self, genre: str, limit: int = 50) -> pd.DataFrame:
         """
@@ -269,17 +266,17 @@ class DataLoader:
         
         Args:
             genre: Genre to filter by.
-            limit: Maximum number of results.
+            limit: Maximum number of results to return.
             
         Returns:
-            DataFrame of movies in the specified genre.
+            DataFrame with movies matching the genre.
         """
         if self.movies_df is None:
             raise ValueError("Movies data not loaded")
         
-        # Filter by genre
-        mask = self.movies_df['genres'].str.contains(genre, case=False)
-        return self.movies_df[mask].head(limit)
+        # Case-insensitive search in the genres string
+        genre_movies = self.movies_df[self.movies_df['genres'].str.contains(genre, case=False, na=False)]
+        return genre_movies.head(limit)
     
     def get_user_ratings(self, user_id: int) -> pd.DataFrame:
         """
@@ -353,73 +350,97 @@ class DataLoader:
     
     def get_unique_genres(self) -> List[str]:
         """
-        Get list of unique genres.
+        Get a list of unique movie genres from the dataset.
         
         Returns:
-            List of unique genres.
+            Sorted list of unique genres.
         """
         if self.movies_df is None:
             raise ValueError("Movies data not loaded")
         
-        # Collect all genres
-        all_genres = []
-        for genres in self.movies_df['genres_list']:
-            all_genres.extend(genres)
+        all_genres = set()
+        # Iterate through the 'genres' column, split by '|', and add to the set
+        for genres_str in self.movies_df['genres'].dropna():
+            genres_list = genres_str.split('|')
+            # Filter out empty strings or placeholder genres like '(no genres listed)'
+            valid_genres = {genre for genre in genres_list if genre and genre != '(no genres listed)'}
+            all_genres.update(valid_genres)
         
-        # Return unique genres, sorted
-        return sorted(list(set([g for g in all_genres if g])))
+        # Return sorted list
+        return sorted(list(all_genres))
     
     def get_popular_movies(self, n: int = 10) -> pd.DataFrame:
         """
-        Get popular movies based on number of ratings.
+        Get the most popular movies based on the number of ratings.
         
         Args:
-            n: Number of movies to return.
+            n: Number of popular movies to return.
             
         Returns:
-            DataFrame of popular movies.
+            DataFrame containing the most popular movies.
         """
-        if self.movies_df is None or self.ratings_df is None:
-            raise ValueError("Movies or ratings data not loaded")
+        if self.ratings_df is None:
+            logger.warning("Ratings data not loaded, cannot determine popular movies by rating count.")
+            # Fallback: return top N movies by arbitrary order if no ratings
+            if self.movies_df is not None:
+                return self.movies_df.head(n)
+            else:
+                return pd.DataFrame()
         
         # Count ratings per movie
-        movie_counts = self.ratings_df['movieId'].value_counts().reset_index()
-        movie_counts.columns = ['movieId', 'count']
+        movie_rating_counts = self.ratings_df.groupby('movieId').size().reset_index(name='rating_count')
         
-        # Join with movies
-        popular = pd.merge(movie_counts, self.movies_df, on='movieId')
+        # Sort by rating count descending
+        popular_movie_ids = movie_rating_counts.sort_values('rating_count', ascending=False).head(n)['movieId']
         
-        # Sort by count and return top n
-        return popular.sort_values('count', ascending=False).head(n)
+        # Get movie details for these IDs
+        popular_movies = self.movies_df[self.movies_df['movieId'].isin(popular_movie_ids)]
+        
+        # Add rating count to the DataFrame and sort by it
+        popular_movies = popular_movies.merge(movie_rating_counts, on='movieId', how='left')
+        popular_movies = popular_movies.sort_values('rating_count', ascending=False)
+        
+        return popular_movies
     
     def get_high_rated_movies(self, min_ratings: int = 10, n: int = 10) -> pd.DataFrame:
         """
-        Get highest rated movies.
+        Get the highest-rated movies, considering a minimum number of ratings.
         
         Args:
-            min_ratings: Minimum number of ratings required.
-            n: Number of movies to return.
+            min_ratings: Minimum number of ratings required for a movie to be considered.
+            n: Number of high-rated movies to return.
             
         Returns:
-            DataFrame of highest rated movies.
+            DataFrame containing the highest-rated movies.
         """
-        if self.movies_df is None or self.ratings_df is None:
-            raise ValueError("Movies or ratings data not loaded")
+        if self.ratings_df is None:
+            logger.warning("Ratings data not loaded, cannot determine high-rated movies.")
+             # Fallback: return top N movies by arbitrary order if no ratings
+            if self.movies_df is not None:
+                return self.movies_df.head(n)
+            else:
+                return pd.DataFrame()
         
-        # Calculate average rating per movie
-        movie_ratings = self.ratings_df.groupby('movieId').agg({
-            'rating': ['mean', 'count']
-        }).reset_index()
-        movie_ratings.columns = ['movieId', 'avg_rating', 'count']
+        # Calculate average rating and rating count per movie
+        movie_stats = self.ratings_df.groupby('movieId').agg(
+            average_rating=pd.NamedAgg(column='rating', aggfunc='mean'),
+            rating_count=pd.NamedAgg(column='rating', aggfunc='count')
+        ).reset_index()
         
-        # Filter by minimum ratings
-        movie_ratings = movie_ratings[movie_ratings['count'] >= min_ratings]
+        # Filter movies with enough ratings
+        qualified_movies = movie_stats[movie_stats['rating_count'] >= min_ratings]
         
-        # Join with movies
-        high_rated = pd.merge(movie_ratings, self.movies_df, on='movieId')
+        # Sort by average rating descending
+        high_rated_ids = qualified_movies.sort_values('average_rating', ascending=False).head(n)['movieId']
         
-        # Sort by rating and return top n
-        return high_rated.sort_values('avg_rating', ascending=False).head(n)
+        # Get movie details for these IDs
+        high_rated_movies = self.movies_df[self.movies_df['movieId'].isin(high_rated_ids)]
+        
+        # Add average rating and rating count to the DataFrame and sort
+        high_rated_movies = high_rated_movies.merge(movie_stats, on='movieId', how='left')
+        high_rated_movies = high_rated_movies.sort_values('average_rating', ascending=False)
+        
+        return high_rated_movies
     
     def describe_data(self) -> Dict:
         """

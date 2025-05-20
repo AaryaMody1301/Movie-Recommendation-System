@@ -35,15 +35,61 @@ class ContentBasedRecommender:
         self.id_to_index = None
         self.index_to_id = None
     
-    def fit(self, movies_df: pd.DataFrame):
+    def fit(self, movies_df: pd.DataFrame, max_items: int = 1000, force_rebuild: bool = False):
         """
         Fit the model with movie data.
         
         Args:
             movies_df: DataFrame containing movie data.
+            max_items: Maximum number of movies to process (use sampling for large datasets)
+            force_rebuild: Force rebuilding embeddings even if cached version exists
         """
         logger.info("Fitting content-based recommender...")
-        self.movies_df = movies_df.copy()
+
+        # Defensive: Ensure max_items is a valid integer
+        if max_items is None or not isinstance(max_items, int) or max_items <= 0:
+            logger.error(f"Invalid max_items value: {max_items}. Must be a positive integer.")
+            raise ValueError(f"max_items must be a positive integer, got {max_items}")
+
+        # Defensive: Ensure movies_df is not None or empty
+        if movies_df is None or len(movies_df) == 0:
+            logger.error("movies_df is None or empty. Cannot fit recommender.")
+            raise ValueError("movies_df is None or empty.")
+
+        # Defensive: Ensure required columns exist
+        required_cols = ['movieId', 'title', 'genres', 'clean_title', 'overview']
+        missing_cols = [col for col in required_cols if col not in movies_df.columns]
+        if missing_cols:
+            logger.error(f"Movies DataFrame missing required columns: {missing_cols}")
+            raise ValueError(f"Movies DataFrame missing required columns: {missing_cols}")
+
+        # Check if we can load from cache instead of rebuilding
+        cache_path = os.path.join('instance', 'embeddings_cache.pkl')
+        if os.path.exists(cache_path) and not force_rebuild:
+            try:
+                logger.info(f"Loading cached embeddings from {cache_path}")
+                with open(cache_path, 'rb') as f:
+                    cache_data = pickle.load(f)
+                    self.movies_df = cache_data.get('movies_df')
+                    self.movie_embeddings = cache_data.get('embeddings')
+                    self.id_to_index = cache_data.get('id_to_index')
+                    self.index_to_id = cache_data.get('index_to_id')
+                    
+                    # Load the transformer model for inference but skip generating embeddings
+                    logger.info(f"Loading transformer model: {self.transformer_model}")
+                    self.model = SentenceTransformer(self.transformer_model)
+                    
+                    logger.info(f"Loaded {len(self.movies_df)} movies with embeddings from cache")
+                    return self
+            except Exception as e:
+                logger.error(f"Failed to load cached embeddings: {e}. Will rebuild.")
+        
+        # Sample data if too large
+        if len(movies_df) > max_items:
+            logger.info(f"Sampling {max_items} movies from {len(movies_df)} total movies")
+            self.movies_df = movies_df.sample(max_items, random_state=42).copy()
+        else:
+            self.movies_df = movies_df.copy()
         
         # Create a mapping from movie ID to index and vice versa
         self.id_to_index = {id: idx for idx, id in enumerate(self.movies_df['movieId'])}
@@ -61,12 +107,27 @@ class ContentBasedRecommender:
         logger.info("Generating embeddings...")
         self.movie_embeddings = self._generate_embeddings(content_features)
         
+        # Save the embeddings to cache
+        try:
+            cache_data = {
+                'movies_df': self.movies_df,
+                'embeddings': self.movie_embeddings,
+                'id_to_index': self.id_to_index,
+                'index_to_id': self.index_to_id
+            }
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, 'wb') as f:
+                pickle.dump(cache_data, f)
+            logger.info(f"Saved embeddings to cache: {cache_path}")
+        except Exception as e:
+            logger.error(f"Failed to save embeddings to cache: {e}")
+        
         logger.info("Content-based recommender fitted successfully")
         return self
     
     def _create_content_features(self) -> List[str]:
         """
-        Create content features from movie metadata.
+        Create content features from movie metadata, including genres, title, overview, cast, director, and keywords if available.
         
         Returns:
             List of content feature strings.
@@ -78,17 +139,31 @@ class ContentBasedRecommender:
         
         content_features = []
         
-        # Use clean_title, genres and overview (if available) to create content features
         for _, row in self.movies_df.iterrows():
             feature = f"{row['clean_title']}. "
-            
-            # Add genres
             feature += f"Genres: {row['genres'].replace('|', ', ')}. "
-            
             # Add overview if available
-            if 'overview' in self.movies_df.columns and row['overview']:
-                feature += f"Overview: {row['overview']}"
-            
+            if 'overview' in self.movies_df.columns and row.get('overview'):
+                feature += f"Overview: {row['overview']}. "
+            # Add director if available
+            if 'director' in self.movies_df.columns and row.get('director'):
+                feature += f"Director: {row['director']}. "
+            # Add cast if available (list or string)
+            if 'cast' in self.movies_df.columns and row.get('cast'):
+                cast = row['cast']
+                if isinstance(cast, list):
+                    cast_str = ', '.join([c['name'] if isinstance(c, dict) and 'name' in c else str(c) for c in cast])
+                else:
+                    cast_str = str(cast)
+                feature += f"Cast: {cast_str}. "
+            # Add keywords if available (list or string)
+            if 'keywords' in self.movies_df.columns and row.get('keywords'):
+                keywords = row['keywords']
+                if isinstance(keywords, list):
+                    keywords_str = ', '.join([k['name'] if isinstance(k, dict) and 'name' in k else str(k) for k in keywords])
+                else:
+                    keywords_str = str(keywords)
+                feature += f"Keywords: {keywords_str}. "
             content_features.append(feature)
         
         return content_features
@@ -103,15 +178,48 @@ class ContentBasedRecommender:
         Returns:
             Array of embeddings.
         """
-        # Generate embeddings in batches to avoid memory issues
-        batch_size = 128
+        # Use even smaller batch size for better reliability and less memory usage
+        batch_size = 16
         embeddings = []
         
-        for i in range(0, len(content_features), batch_size):
-            batch = content_features[i:i+batch_size]
-            batch_embeddings = self.model.encode(batch, show_progress_bar=True)
-            embeddings.append(batch_embeddings)
+        logger.info(f"Generating embeddings for {len(content_features)} items with batch size {batch_size}")
         
+        total_batches = (len(content_features) + batch_size - 1) // batch_size
+        
+        # Process in smaller chunks with progress tracking
+        for chunk_start in range(0, len(content_features), batch_size * 10):
+            chunk_end = min(chunk_start + batch_size * 10, len(content_features))
+            chunk_features = content_features[chunk_start:chunk_end]
+            chunk_total = (chunk_end - chunk_start + batch_size - 1) // batch_size
+            
+            logger.info(f"Processing chunk {chunk_start//batch_size//10 + 1}/{(total_batches-1)//10 + 1} ({chunk_start}-{chunk_end})")
+            
+            for i in range(0, len(chunk_features), batch_size):
+                batch_num = (chunk_start + i) // batch_size + 1
+                batch = chunk_features[i:i+batch_size]
+                
+                try:
+                    # Use convert_to_tensor=False for less memory usage
+                    batch_embeddings = self.model.encode(
+                        batch, 
+                        show_progress_bar=False,
+                        convert_to_numpy=True,
+                        normalize_embeddings=True,
+                        device='cpu'  # Explicitly use CPU for more stability
+                    )
+                    embeddings.append(batch_embeddings)
+                    
+                    # Log only occasionally to reduce console spam
+                    if batch_num % 20 == 0 or batch_num == total_batches:
+                        logger.info(f"Processed batch {batch_num}/{total_batches} ({(batch_num/total_batches*100):.1f}%)")
+                        
+                except Exception as e:
+                    logger.error(f"Error in batch {batch_num}: {str(e)}")
+                    # Return a zero embedding as fallback for this batch to allow processing to continue
+                    zero_embedding = np.zeros((len(batch), self.model.get_sentence_embedding_dimension()))
+                    embeddings.append(zero_embedding)
+        
+        logger.info("Embedding generation completed")
         return np.vstack(embeddings)
     
     def get_similar_movies(self, movie_id: int, top_n: int = 10) -> List[Tuple[int, float]]:
@@ -264,4 +372,4 @@ class ContentBasedRecommender:
         recommender.model = SentenceTransformer(recommender.transformer_model)
         
         logger.info(f"Content-based model loaded from {path}")
-        return recommender 
+        return recommender

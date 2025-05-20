@@ -81,4 +81,90 @@ logs/
 
 # Specific to this project
 node_modules/
-.DS_Store 
+.DS_Store
+
+# Additional ignores for a clean GitHub release
+*.pyo
+*.pyd
+*.sav
+*.bak
+*.tmp
+*.swp
+*.swo
+*.orig
+*.log
+*.dat
+*.csv~
+*.json~
+*.yaml~
+*.yml~
+*.gz
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.7z
+*.rar
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+*.iml
+
+# VSCode settings
+.vscode/
+.history/
+
+# PyCharm settings
+.idea/
+
+# macOS
+.DS_Store
+
+# Node.js
+node_modules/
+
+# Local environment files
+.env
+.env.*
+
+# Logs
+logs/
+
+# Ignore all virtual environments
+venv/
+.venv/
+env/
+ENV/
+venv.bak/
+env.bak/
+
+# Ignore all __pycache__ and Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore database and model files
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+*.h5
+*.model
+*.joblib
+
+# Ignore test cache
+.pytest_cache/
+
+# Ignore egg-info
+*.egg-info/
+.eggs/
+
+# Ignore coverage and test output
+.coverage
+coverage.xml
+htmlcov/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/

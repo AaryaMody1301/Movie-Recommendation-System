@@ -22,12 +22,20 @@ def profile():
     """User profile page."""
     # Get user profile data
     profile_data = get_user_profile(current_user.id)
+    if not profile_data:
+        flash('Could not load your profile information.', 'danger')
+        return render_template('user/profile.html', profile=None, ratings=[], watchlist=[])
     
     # Get recent ratings
     ratings = get_user_ratings(current_user.id, limit=5)
     
     # Get watchlist
     watchlist = get_user_watchlist(current_user.id, limit=5)
+    
+    if not ratings:
+        flash('You have not rated any movies yet.', 'info')
+    if not watchlist:
+        flash('Your watchlist is empty.', 'info')
     
     return render_template(
         'user/profile.html',
@@ -57,6 +65,9 @@ def ratings():
         sort_by=sort_by,
         sort_order=sort_order
     )
+    
+    if total == 0:
+        flash('You have not rated any movies yet.', 'info')
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
@@ -93,6 +104,9 @@ def watchlist():
         sort_by=sort_by,
         sort_order=sort_order
     )
+    
+    if total == 0:
+        flash('Your watchlist is empty.', 'info')
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
@@ -194,4 +208,4 @@ def api_update_watchlist_notes():
     except ValueError:
         return jsonify({'error': 'Invalid movie ID'}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500

@@ -1,7 +1,7 @@
 """
 Recommendations blueprint for personalized recommendations.
 """
-from flask import Blueprint, render_template, request, jsonify, abort, current_app
+from flask import Blueprint, render_template, request, jsonify, abort, current_app, flash
 from flask_login import login_required, current_user
 from services.recommendation_service import (
     get_recommendations_for_user,
@@ -37,6 +37,9 @@ def user_recommendations():
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
+
+    if total == 0:
+        flash('No personalized recommendations available at this time.', 'info')
     
     return render_template(
         'recommendations/personal.html',
@@ -55,7 +58,8 @@ def similar_movies(movie_id):
     # Get the movie
     movie = get_movie_by_id(movie_id)
     if not movie:
-        abort(404)
+        flash('Movie not found.', 'warning')
+        return render_template('recommendations/similar.html', movie=None, recommendations=[], page=1, per_page=12, total_pages=0, total_recommendations=0)
     
     # Pagination parameters
     page = request.args.get('page', 1, type=int)
@@ -66,6 +70,9 @@ def similar_movies(movie_id):
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
+    
+    if total == 0:
+        flash('No similar movies found.', 'info')
     
     return render_template(
         'recommendations/similar.html',
@@ -85,7 +92,8 @@ def personalized_movie_recommendations(movie_id):
     # Get the movie
     movie = get_movie_by_id(movie_id)
     if not movie:
-        abort(404)
+        flash('Movie not found.', 'warning')
+        return render_template('recommendations/personalized.html', movie=None, recommendations=[], page=1, per_page=12, total_pages=0, total_recommendations=0, strategy=strategy)
     
     # Pagination parameters
     page = request.args.get('page', 1, type=int)
@@ -105,6 +113,9 @@ def personalized_movie_recommendations(movie_id):
     
     # Calculate total pages
     total_pages = (total + per_page - 1) // per_page
+    
+    if total == 0:
+        flash('No personalized recommendations for this movie.', 'info')
     
     return render_template(
         'recommendations/personalized.html',
@@ -202,4 +213,4 @@ def api_get_recommendations():
     
     except Exception as e:
         current_app.logger.error(f"Error getting recommendations: {str(e)}")
-        return jsonify({'error': 'An error occurred'}), 500 
+        return jsonify({'error': 'An error occurred'}), 500

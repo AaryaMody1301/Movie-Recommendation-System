@@ -34,4 +34,8 @@ CREATE INDEX idx_ratings_movie_id ON ratings (movie_id);
 CREATE INDEX idx_ratings_user_movie ON ratings (user_id, movie_id);
 CREATE INDEX idx_watchlist_user_id ON watchlist (user_id);
 CREATE INDEX idx_watchlist_movie_id ON watchlist (movie_id);
-CREATE INDEX idx_watchlist_user_movie ON watchlist (user_id, movie_id); 
+CREATE INDEX idx_watchlist_user_movie ON watchlist (user_id, movie_id);
+
+-- Add indexes for timestamp/datetime columns
+CREATE INDEX idx_ratings_timestamp ON ratings (timestamp);
+CREATE INDEX idx_watchlist_added_at ON watchlist (added_at); 
