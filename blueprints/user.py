@@ -1,211 +1,194 @@
-"""
-User blueprint for user profiles and watchlists.
-"""
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, abort
-from flask_login import login_required, current_user
+"""User profile, ratings, and watchlist routes."""
+
+from __future__ import annotations
+
+from flask import Blueprint, flash, jsonify, render_template, request
+from flask_login import current_user, login_required
+
+from services.movie_service import get_movie_by_id, get_unique_genres
 from services.user_service import (
+    add_to_watchlist,
+    delete_user_rating,
     get_user_profile,
     get_user_ratings,
     get_user_watchlist,
-    add_to_watchlist,
     remove_from_watchlist,
-    update_watchlist_notes
+    update_watchlist_notes,
 )
-from services.movie_service import get_movie_by_id
 
-user = Blueprint('user', __name__)
+user = Blueprint("user", __name__)
 
 
-@user.route('/profile')
+def _page_args(default_per_page: int = 24):
+    page = max(1, request.args.get("page", 1, type=int) or 1)
+    per_page = request.args.get("per_page", default_per_page, type=int) or default_per_page
+    per_page = min(100, max(1, per_page))
+    return page, per_page
+
+
+def _json_object():
+    payload = request.get_json(silent=True)
+    return payload if isinstance(payload, dict) else None
+
+
+@user.route("/profile")
 @login_required
 def profile():
-    """User profile page."""
-    # Get user profile data
     profile_data = get_user_profile(current_user.id)
     if not profile_data:
-        flash('Could not load your profile information.', 'danger')
-        return render_template('user/profile.html', profile=None, ratings=[], watchlist=[])
-    
-    # Get recent ratings
-    ratings = get_user_ratings(current_user.id, limit=5)
-    
-    # Get watchlist
-    watchlist = get_user_watchlist(current_user.id, limit=5)
-    
-    if not ratings:
-        flash('You have not rated any movies yet.', 'info')
-    if not watchlist:
-        flash('Your watchlist is empty.', 'info')
-    
+        flash("Could not load your profile information.", "danger")
+        return render_template(
+            "user/profile.html",
+            profile=None,
+            ratings=[],
+            watchlist=[],
+            genres=get_unique_genres(),
+        )
+
+    ratings, _ = get_user_ratings(current_user.id, page=1, per_page=5)
+    watchlist, _ = get_user_watchlist(current_user.id, page=1, per_page=5)
     return render_template(
-        'user/profile.html',
+        "user/profile.html",
         profile=profile_data,
         ratings=ratings,
-        watchlist=watchlist
+        watchlist=watchlist,
+        genres=get_unique_genres(),
     )
 
 
-@user.route('/ratings')
+@user.route("/ratings")
 @login_required
 def ratings():
-    """User ratings page."""
-    # Pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 24, type=int)
-    
-    # Sorting parameters
-    sort_by = request.args.get('sort_by', 'date')
-    sort_order = request.args.get('sort_order', 'desc')
-    
-    # Get user ratings with pagination
-    ratings, total = get_user_ratings(
+    page, per_page = _page_args()
+    sort_by = request.args.get("sort_by", "date")
+    sort_order = request.args.get("sort_order", "desc").lower()
+    if sort_by not in {"date", "rating", "movie_id"}:
+        sort_by = "date"
+    if sort_order not in {"asc", "desc"}:
+        sort_order = "desc"
+
+    items, total = get_user_ratings(
         current_user.id,
         page=page,
         per_page=per_page,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
     )
-    
-    if total == 0:
-        flash('You have not rated any movies yet.', 'info')
-    
-    # Calculate total pages
-    total_pages = (total + per_page - 1) // per_page
-    
     return render_template(
-        'user/ratings.html',
-        ratings=ratings,
+        "user/ratings.html",
+        ratings=items,
         page=page,
         per_page=per_page,
-        total_pages=total_pages,
+        total_pages=(total + per_page - 1) // per_page,
         total_ratings=total,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        genres=get_unique_genres(),
     )
 
 
-@user.route('/watchlist')
+@user.route("/watchlist")
 @login_required
 def watchlist():
-    """User watchlist page."""
-    # Pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 24, type=int)
-    
-    # Sorting parameters
-    sort_by = request.args.get('sort_by', 'date')
-    sort_order = request.args.get('sort_order', 'desc')
-    
-    # Get user watchlist with pagination
-    watchlist_items, total = get_user_watchlist(
+    page, per_page = _page_args()
+    sort_by = request.args.get("sort_by", "date")
+    sort_order = request.args.get("sort_order", "desc").lower()
+    if sort_by not in {"date", "movie_id"}:
+        sort_by = "date"
+    if sort_order not in {"asc", "desc"}:
+        sort_order = "desc"
+
+    items, total = get_user_watchlist(
         current_user.id,
         page=page,
         per_page=per_page,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
     )
-    
-    if total == 0:
-        flash('Your watchlist is empty.', 'info')
-    
-    # Calculate total pages
-    total_pages = (total + per_page - 1) // per_page
-    
     return render_template(
-        'user/watchlist.html',
-        watchlist=watchlist_items,
+        "user/watchlist.html",
+        watchlist=items,
         page=page,
         per_page=per_page,
-        total_pages=total_pages,
+        total_pages=(total + per_page - 1) // per_page,
         total_items=total,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        genres=get_unique_genres(),
     )
 
 
-@user.route('/api/watchlist/add', methods=['POST'])
+@user.route("/api/watchlist/add", methods=["POST"])
 @login_required
 def api_add_to_watchlist():
-    """API endpoint for adding a movie to the watchlist."""
-    movie_id = request.json.get('movieId')
-    notes = request.json.get('notes', '')
-    
-    if not movie_id:
-        return jsonify({'error': 'Missing movie ID'}), 400
-    
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "Expected a JSON object"}), 400
+
     try:
-        # Convert to proper type
-        movie_id = int(movie_id)
-        
-        # Check if movie exists
-        movie = get_movie_by_id(movie_id)
-        if not movie:
-            return jsonify({'error': 'Movie not found'}), 404
-        
-        # Add to watchlist
-        success = add_to_watchlist(current_user.id, movie_id, notes)
-        
-        if success:
-            return jsonify({'success': True, 'message': 'Added to watchlist'})
-        else:
-            return jsonify({'error': 'Failed to add to watchlist'}), 500
-            
-    except ValueError:
-        return jsonify({'error': 'Invalid movie ID'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        movie_id = int(payload.get("movieId"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing movie ID"}), 400
+
+    notes = payload.get("notes", "")
+    if not isinstance(notes, str):
+        return jsonify({"error": "Notes must be text"}), 400
+    if len(notes) > 2000:
+        return jsonify({"error": "Notes must be 2000 characters or fewer"}), 400
+    if not get_movie_by_id(movie_id, with_tmdb=False):
+        return jsonify({"error": "Movie not found"}), 404
+
+    result = add_to_watchlist(current_user.id, movie_id, notes)
+    if result.get("success"):
+        return jsonify(result), 201
+    status = 409 if "already" in result.get("error", "").lower() else 400
+    return jsonify(result), status
 
 
-@user.route('/api/watchlist/remove', methods=['POST'])
+@user.route("/api/watchlist/remove", methods=["POST"])
 @login_required
 def api_remove_from_watchlist():
-    """API endpoint for removing a movie from the watchlist."""
-    movie_id = request.json.get('movieId')
-    
-    if not movie_id:
-        return jsonify({'error': 'Missing movie ID'}), 400
-    
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "Expected a JSON object"}), 400
     try:
-        # Convert to proper type
-        movie_id = int(movie_id)
-        
-        # Remove from watchlist
-        success = remove_from_watchlist(current_user.id, movie_id)
-        
-        if success:
-            return jsonify({'success': True, 'message': 'Removed from watchlist'})
-        else:
-            return jsonify({'error': 'Failed to remove from watchlist'}), 500
-            
-    except ValueError:
-        return jsonify({'error': 'Invalid movie ID'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        movie_id = int(payload.get("movieId"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing movie ID"}), 400
+
+    result = remove_from_watchlist(current_user.id, movie_id)
+    return (jsonify(result), 200) if result.get("success") else (jsonify(result), 404)
 
 
-@user.route('/api/watchlist/update', methods=['POST'])
+@user.route("/api/watchlist/update", methods=["POST"])
 @login_required
 def api_update_watchlist_notes():
-    """API endpoint for updating watchlist item notes."""
-    movie_id = request.json.get('movieId')
-    notes = request.json.get('notes', '')
-    
-    if not movie_id:
-        return jsonify({'error': 'Missing movie ID'}), 400
-    
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "Expected a JSON object"}), 400
     try:
-        # Convert to proper type
-        movie_id = int(movie_id)
-        
-        # Update notes
-        success = update_watchlist_notes(current_user.id, movie_id, notes)
-        
-        if success:
-            return jsonify({'success': True, 'message': 'Notes updated'})
-        else:
-            return jsonify({'error': 'Failed to update notes'}), 500
-            
-    except ValueError:
-        return jsonify({'error': 'Invalid movie ID'}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        movie_id = int(payload.get("movieId"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing movie ID"}), 400
+
+    notes = payload.get("notes", "")
+    if not isinstance(notes, str) or len(notes) > 2000:
+        return jsonify({"error": "Notes must be text up to 2000 characters"}), 400
+
+    result = update_watchlist_notes(current_user.id, movie_id, notes)
+    return (jsonify(result), 200) if result.get("success") else (jsonify(result), 404)
+
+
+@user.route("/api/ratings/remove", methods=["POST"])
+@login_required
+def api_remove_rating():
+    payload = _json_object()
+    if payload is None:
+        return jsonify({"error": "Expected a JSON object"}), 400
+    try:
+        movie_id = int(payload.get("movieId"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing movie ID"}), 400
+
+    result = delete_user_rating(current_user.id, movie_id)
+    return (jsonify(result), 200) if result.get("success") else (jsonify(result), 404)
