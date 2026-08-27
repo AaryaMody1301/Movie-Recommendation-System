@@ -1,170 +1,69 @@
-# Byte-compiled / optimized / DLL files
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.ipynb_checkpoints/
 
-# C extensions
-*.so
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
 
-# Distribution / packaging
-.Python
+# Packaging and build output
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.eggs/
 
-# Unit test / coverage reports
+# Test and coverage output
+.coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .tox/
 .nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Database
+# Application state and local databases
 instance/
 *.db
 *.sqlite
 *.sqlite3
 
-# Model files
+# Generated models, caches, and logs
 *.pkl
-*.h5
-*.model
 *.joblib
-
-# Logs
-logs/
+*.model
+*.h5
 *.log
+logs/
 
-# Visual Studio Code
+# Editor and operating-system files
 .vscode/
-.history
-
-# PyCharm
 .idea/
-
-# Specific to this project
-node_modules/
+.history/
 .DS_Store
-
-# Additional ignores for a clean GitHub release
-*.pyo
-*.pyd
-*.sav
-*.bak
-*.tmp
 *.swp
 *.swo
 *.orig
-*.log
-*.dat
-*.csv~
-*.json~
-*.yaml~
-*.yml~
-*.gz
+*.bak
+*.tmp
+
+# Local archives and generated bundles
 *.zip
 *.tar
 *.tar.gz
 *.tar.bz2
 *.tar.xz
 *.7z
-*.rar
-*.pdf
-*.docx
-*.xlsx
-*.pptx
-*.iml
+*.gz
 
-# VSCode settings
-.vscode/
-.history/
-
-# PyCharm settings
-.idea/
-
-# macOS
-.DS_Store
-
-# Node.js
+# Optional frontend dependencies
 node_modules/
-
-# Local environment files
-.env
-.env.*
-
-# Logs
-logs/
-
-# Ignore all virtual environments
-venv/
-.venv/
-env/
-ENV/
-venv.bak/
-env.bak/
-
-# Ignore all __pycache__ and Python cache files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Ignore database and model files
-*.db
-*.sqlite
-*.sqlite3
-*.pkl
-*.h5
-*.model
-*.joblib
-
-# Ignore test cache
-.pytest_cache/
-
-# Ignore egg-info
-*.egg-info/
-.eggs/
-
-# Ignore coverage and test output
-.coverage
-coverage.xml
-htmlcov/
-
-# Ignore Jupyter Notebook checkpoints
-.ipynb_checkpoints/
