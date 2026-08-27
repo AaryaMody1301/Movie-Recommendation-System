@@ -58,7 +58,18 @@ class Config:
     )
 
     TMDB_API_KEY = os.environ.get('TMDB_API_KEY')
+    TMDB_LANGUAGE = os.environ.get('TMDB_LANGUAGE', 'en-US')
+    TMDB_WATCH_REGION = os.environ.get('TMDB_WATCH_REGION', 'IN').upper()
     TMDB_REQUEST_TIMEOUT = float(os.environ.get('TMDB_REQUEST_TIMEOUT', '10'))
+    TMDB_RETRY_TOTAL = int(os.environ.get('TMDB_RETRY_TOTAL', '2'))
+    TMDB_RETRY_BACKOFF = float(os.environ.get('TMDB_RETRY_BACKOFF', '0.5'))
+    # Short process-local HTTP response cache; normalized detail payloads below are
+    # also persisted in SQLAlchemy and survive application restarts.
+    TMDB_HTTP_CACHE_TTL = int(os.environ.get('TMDB_HTTP_CACHE_TTL', '900'))
+    TMDB_ENRICHMENT_TTL = int(os.environ.get('TMDB_ENRICHMENT_TTL', '604800'))
+    TMDB_STALE_CACHE_TTL = int(os.environ.get('TMDB_STALE_CACHE_TTL', '2592000'))
+    TMDB_MAPPING_TTL = int(os.environ.get('TMDB_MAPPING_TTL', '2592000'))
+    TMDB_NEGATIVE_MAPPING_TTL = int(os.environ.get('TMDB_NEGATIVE_MAPPING_TTL', '86400'))
 
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
