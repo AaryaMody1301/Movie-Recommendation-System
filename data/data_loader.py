@@ -101,7 +101,9 @@ class DataLoader:
             )
         if "clean_title" not in frame.columns:
             frame["clean_title"] = frame["title"].str.replace(r"\s*\(\d{4}\)$", "", regex=True)
-        frame["genres_list"] = frame["genres"].apply(lambda value: value.split("|") if value else [])
+        frame["genres_list"] = frame["genres"].apply(
+            lambda value: [genre for genre in value.split("|") if genre] if value else []
+        )
         if "overview" not in frame.columns:
             frame["overview"] = ""
         if "poster_url" not in frame.columns:
@@ -148,17 +150,31 @@ class DataLoader:
         match = movies[movies["movieId"] == int(movie_id)]
         return None if match.empty else match.iloc[0]
 
-    def search_movies(self, query: str, limit: int = 10) -> pd.DataFrame:
-        """Search titles; Phase 4 will replace current regex/truncation behavior."""
-        movies = self.get_movies()
-        matches = movies[movies["title"].str.contains(query, case=False, na=False)]
-        return matches.head(max(1, int(limit)))
+    def search_movies(self, query: str) -> pd.DataFrame:
+        """Return every movie whose title contains ``query`` as a literal string.
 
-    def get_movies_by_genre(self, genre: str, limit: int = 50) -> pd.DataFrame:
-        """Filter genres; exact matching/pagination semantics are a Phase 4 task."""
+        Pagination belongs to the service layer. User-entered characters such as
+        ``(``, ``[``, ``+`` and ``.`` are therefore never interpreted as regular
+        expression operators.
+        """
         movies = self.get_movies()
-        matches = movies[movies["genres"].str.contains(genre, case=False, na=False)]
-        return matches.head(max(1, int(limit)))
+        query = str(query or "").strip()
+        if not query:
+            return movies.iloc[0:0].copy()
+        mask = movies["title"].str.contains(query, case=False, na=False, regex=False)
+        return movies.loc[mask].copy()
+
+    def get_movies_by_genre(self, genre: str) -> pd.DataFrame:
+        """Return every movie containing ``genre`` as an exact parsed genre value."""
+        movies = self.get_movies()
+        target = str(genre or "").strip().casefold()
+        if not target:
+            return movies.iloc[0:0].copy()
+
+        mask = movies["genres_list"].apply(
+            lambda values: any(str(value).casefold() == target for value in values)
+        )
+        return movies.loc[mask].copy()
 
     def get_user_ratings(self, user_id: int) -> pd.DataFrame:
         ratings = self.get_ratings()
@@ -195,13 +211,24 @@ class DataLoader:
 
     def get_unique_genres(self) -> List[str]:
         all_genres = set()
-        for genres in self.get_movies()["genres"].dropna():
+        for genres in self.get_movies()["genres_list"]:
             all_genres.update(
                 genre
-                for genre in str(genres).split("|")
+                for genre in genres
                 if genre and genre != "(no genres listed)"
             )
         return sorted(all_genres)
+
+    def get_movie_rating_stats(self) -> pd.DataFrame:
+        """Return baseline average/count statistics for every rated movie."""
+        ratings = self.get_ratings()
+        if ratings.empty:
+            return pd.DataFrame(columns=["movieId", "average_rating", "rating_count"])
+        return (
+            ratings.groupby("movieId")["rating"]
+            .agg(average_rating="mean", rating_count="count")
+            .reset_index()
+        )
 
     def get_popular_movies(self, n: int = 10) -> pd.DataFrame:
         movies = self.get_movies()
@@ -215,15 +242,10 @@ class DataLoader:
 
     def get_high_rated_movies(self, min_ratings: int = 10, n: int = 10) -> pd.DataFrame:
         movies = self.get_movies()
-        ratings = self.get_ratings()
-        if ratings.empty:
+        stats = self.get_movie_rating_stats()
+        if stats.empty:
             return movies.head(max(1, int(n))).copy()
 
-        stats = (
-            ratings.groupby("movieId")["rating"]
-            .agg(average_rating="mean", rating_count="count")
-            .reset_index()
-        )
         qualified = stats[stats["rating_count"] >= max(1, int(min_ratings))]
         if qualified.empty:
             qualified = stats
