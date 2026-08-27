@@ -111,7 +111,7 @@ Goal: leave a coherent project rather than a collection of historical implementa
 - Add contribution/development instructions and troubleshooting guidance.
 - Complete final repository hygiene and historical cleanup documentation.
 
-**Status: in progress on `fix/phase-8-repository-cleanup`.**
+**Status: complete; awaiting merge of PR #8.**
 
 ### Phase 8 cleanup contract
 
