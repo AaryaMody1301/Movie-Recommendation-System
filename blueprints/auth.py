@@ -17,7 +17,7 @@ auth = Blueprint("auth", __name__)
 @auth.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("main.index"))
+        return redirect(url_for("user.profile"))
 
     form = LoginForm()
     if form.validate_on_submit():
@@ -27,7 +27,7 @@ def login():
             next_page = request.args.get("next", "")
             if next_page.startswith("/") and not next_page.startswith("//"):
                 return redirect(next_page)
-            return redirect(url_for("main.index"))
+            return redirect(url_for("user.profile"))
         flash("Invalid username/email or password.", "danger")
 
     return render_template("auth/login.html", form=form)
@@ -36,7 +36,7 @@ def login():
 @auth.route("/register", methods=["GET", "POST"])
 def register():
     if current_user.is_authenticated:
-        return redirect(url_for("main.index"))
+        return redirect(url_for("user.profile"))
 
     form = RegistrationForm()
     if form.validate_on_submit():

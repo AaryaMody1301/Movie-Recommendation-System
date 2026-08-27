@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Personalized: {{ movie.title }}{% endblock %}
+{% block content %}
+<h1 class="h2 mb-1">Because you are viewing {{ movie.title }}</h1>
+<p class="text-muted mb-4">Similar movies adjusted with your persisted genre preferences · {{ strategy }} strategy.</p>
+<div class="row g-4">
+{% for rec in recommendations %}
+  <div class="col-md-6 col-lg-4"><div class="card h-100"><div class="card-body d-flex flex-column">
+    <h2 class="h5">{{ rec.movie.title }}</h2><p class="text-muted small">{{ rec.movie.genres }}</p><p class="small">{{ rec.reason }}</p>
+    {% if rec.score is not none %}<div class="small text-muted mb-3">Score: {{ "%.3f"|format(rec.score) }}</div>{% endif %}
+    <div class="mt-auto"><a class="btn btn-sm btn-primary" href="{{ url_for('movies.movie_detail', movie_id=rec.movie.movieId) }}">Details</a></div>
+  </div></div></div>
+{% else %}<div class="col-12"><div class="alert alert-info">No personalized matches were found.</div></div>{% endfor %}
+</div>
+{% if total_pages > 1 %}<nav class="mt-4"><ul class="pagination">{% for number in range(1, total_pages + 1) %}<li class="page-item {% if number == page %}active{% endif %}"><a class="page-link" href="{{ url_for('recommendations.personalized_movie_recommendations', movie_id=movie.movieId, page=number, per_page=per_page, strategy=strategy) }}">{{ number }}</a></li>{% endfor %}</ul></nav>{% endif %}
+{% endblock %}

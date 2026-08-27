@@ -17,7 +17,7 @@ Goal: make the current application safe to configure and predictable to start be
 - Make the WSGI entry point deterministic for Gunicorn/import-based servers.
 - Align `.env.example` and configuration defaults.
 
-Status: in progress on `fix/phase-1-foundation`.
+**Status: complete and merged.**
 
 ## Phase 2 — Application architecture and database integrity
 
@@ -31,6 +31,8 @@ Goal: remove the two competing Flask architectures and make user data persistenc
 - Stop silently falling back to in-memory SQLite for unsupported database URIs.
 - Create missing forms and templates required by enabled blueprints.
 
+**Status: complete and merged.**
+
 ## Phase 3 — Data/service contract repair
 
 Goal: make every service operate against one documented DataLoader API.
@@ -41,6 +43,8 @@ Goal: make every service operate against one documented DataLoader API.
 - Align blueprint imports with real service function names and signatures.
 - Persist user ratings/watchlists instead of using placeholders or in-memory mutations.
 - Add validation for pagination, sorting, and API request payloads.
+
+**Status: in progress on `fix/phase-3-service-contracts`.**
 
 ## Phase 4 — Search, browse, and recommendation correctness
 
