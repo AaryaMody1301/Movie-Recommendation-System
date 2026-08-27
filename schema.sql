@@ -9,14 +9,11 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_login DATETIME,
-    reset_token_hash TEXT,
-    reset_token_expires_at DATETIME
+    last_login DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS ix_users_username ON users (username);
 CREATE INDEX IF NOT EXISTS ix_users_email ON users (email);
-CREATE INDEX IF NOT EXISTS ix_users_reset_token_hash ON users (reset_token_hash);
 
 CREATE TABLE IF NOT EXISTS ratings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
