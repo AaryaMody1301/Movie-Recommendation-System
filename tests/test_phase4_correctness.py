@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from flask import Flask
 
+import app as app_module
 from data.data_loader import DataLoader
 import models.content_based as content_module
 from models.content_based import ContentBasedRecommender
@@ -110,6 +111,33 @@ def test_content_fallback_has_stable_nested_shape(tmp_path):
     assert all(set(item) >= {"movie", "score", "reason"} for item in recommendations)
     assert all(isinstance(item["movie"], dict) for item in recommendations)
     assert all(item["movie"]["movieId"] != 1 for item in recommendations)
+
+
+def test_catalog_survives_recommender_initialization_failure(monkeypatch, tmp_path):
+    movies_path = _write_catalog(tmp_path)
+
+    class BrokenRecommender:
+        def __init__(self, transformer_model):
+            self.transformer_model = transformer_model
+
+        def fit(self, *args, **kwargs):
+            raise RuntimeError("simulated transformer failure")
+
+    monkeypatch.setattr(app_module, "ContentBasedRecommender", BrokenRecommender)
+    app = Flask(__name__)
+    app.config.update(
+        MOVIES_CSV=str(movies_path),
+        RATINGS_CSV=None,
+        TRANSFORMER_MODEL="broken-model",
+        EMBEDDING_BATCH_SIZE=2,
+        EMBEDDINGS_CACHE_PATH=str(tmp_path / "broken-cache.pkl"),
+    )
+
+    app_module._initialize_recommender(app, embedding_args=None)
+
+    assert app.data_loader is not None
+    assert len(app.data_loader.get_movies()) == 27
+    assert app.recommender is None
 
 
 class _FakeSentenceTransformer:
