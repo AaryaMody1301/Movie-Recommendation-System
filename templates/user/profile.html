@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Profile - Movie Recommendation System{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h1 class="h2 mb-1">Your profile</h1>
+    {% if profile %}<p class="text-muted mb-0">{{ profile.username }} · {{ profile.email }}</p>{% endif %}
+  </div>
+  <a class="btn btn-warning" href="{{ url_for('recommendations.user_recommendations') }}">Recommendations</a>
+</div>
+
+{% if profile %}
+<div class="row g-3 mb-5">
+  <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Ratings</div><div class="display-6">{{ profile.ratingCount }}</div></div></div></div>
+  <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Average rating</div><div class="display-6">{{ "%.2f"|format(profile.averageRating) }}</div></div></div></div>
+  <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Watchlist</div><div class="display-6">{{ profile.watchlistCount }}</div></div></div></div>
+  <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted small">Favorite genres</div><div>{% for item in profile.favoriteGenres[:3] %}<span class="badge text-bg-secondary me-1">{{ item.genre }}</span>{% else %}<span class="text-muted">Not enough ratings yet</span>{% endfor %}</div></div></div></div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="d-flex justify-content-between align-items-center mb-2"><h2 class="h4 mb-0">Recent ratings</h2><a href="{{ url_for('user.ratings') }}">View all</a></div>
+    <div class="list-group">
+      {% for item in ratings %}
+      <a class="list-group-item list-group-item-action d-flex justify-content-between" href="{{ url_for('movies.movie_detail', movie_id=item.movieId) }}"><span>{{ item.movie.title }}</span><strong>{{ "%.1f"|format(item.rating) }}/5</strong></a>
+      {% else %}<div class="list-group-item text-muted">You have not rated any movies yet.</div>{% endfor %}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="d-flex justify-content-between align-items-center mb-2"><h2 class="h4 mb-0">Watchlist</h2><a href="{{ url_for('user.watchlist') }}">View all</a></div>
+    <div class="list-group">
+      {% for item in watchlist %}
+      <a class="list-group-item list-group-item-action" href="{{ url_for('movies.movie_detail', movie_id=item.movieId) }}"><div class="fw-semibold">{{ item.movie.title }}</div>{% if item.notes %}<div class="small text-muted">{{ item.notes }}</div>{% endif %}</a>
+      {% else %}<div class="list-group-item text-muted">Your watchlist is empty.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
