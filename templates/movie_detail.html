@@ -13,6 +13,18 @@
     <div class="mb-3"><h5 class="text-muted">Genres</h5><div class="d-flex flex-wrap gap-1">{% if movie.genres %}{% for genre in movie.genres.split('|') %}<span class="genre-badge">{{ genre }}</span>{% endfor %}{% else %}<span class="text-muted">No genres available</span>{% endif %}</div></div>
     {% if movie.overview %}<div class="mb-4"><h5>Overview</h5><p>{{ movie.overview }}</p></div>{% endif %}
 
+    {% set providers = movie.watch_providers if movie.watch_providers is defined else none %}
+    {% if providers and (providers.flatrate or providers.rent or providers.buy) %}
+    <div class="card mb-4"><div class="card-body">
+      <h2 class="h5 mb-3">Where to watch{% if providers.region %} · {{ providers.region }}{% endif %}</h2>
+      {% if providers.flatrate %}<div class="mb-2"><strong>Stream:</strong> {% for provider in providers.flatrate %}<span class="badge text-bg-primary me-1">{{ provider.provider_name }}</span>{% endfor %}</div>{% endif %}
+      {% if providers.rent %}<div class="mb-2"><strong>Rent:</strong> {% for provider in providers.rent %}<span class="badge text-bg-secondary me-1">{{ provider.provider_name }}</span>{% endfor %}</div>{% endif %}
+      {% if providers.buy %}<div class="mb-2"><strong>Buy:</strong> {% for provider in providers.buy %}<span class="badge text-bg-dark me-1">{{ provider.provider_name }}</span>{% endfor %}</div>{% endif %}
+      {% if providers.link %}<a class="btn btn-sm btn-outline-secondary mt-2" href="{{ providers.link }}" target="_blank" rel="noopener noreferrer">View availability on TMDb</a>{% endif %}
+      <div class="small text-muted mt-3">Streaming availability data provided by JustWatch via TMDb.</div>
+    </div></div>
+    {% endif %}
+
     {% if movie.movieId is defined and movie.movieId %}
     <div class="d-flex flex-wrap gap-2 mb-4">
       <a class="btn btn-outline-primary" href="{{ url_for('recommendations.similar_movies', movie_id=movie.movieId) }}">Similar movies</a>
