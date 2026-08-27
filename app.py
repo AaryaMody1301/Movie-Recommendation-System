@@ -79,11 +79,12 @@ def create_app(test_config=None, embedding_args=None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(get_config())
 
+    # Optional instance-specific overrides apply to normal runtime configuration.
+    app.config.from_pyfile("config.py", silent=True)
+
+    # Explicit test configuration must win over both environment and instance files.
     if test_config:
         app.config.from_mapping(test_config)
-
-    # Optional instance-specific overrides are loaded after environment defaults.
-    app.config.from_pyfile("config.py", silent=True)
 
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
