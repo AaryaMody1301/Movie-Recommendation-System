@@ -1,8 +1,9 @@
 """Canonical movie catalog service with durable, bounded TMDb enrichment.
 
-The Flask application owns one DataLoader and content recommender.  TMDb identity
-mappings are persisted in SQLAlchemy, and list enrichment is cache-only by default so
-Browse/Search/Genre/Home cannot fan out into dozens of synchronous remote requests.
+The Flask application owns one DataLoader and content recommender. TMDb identity
+mappings are persisted in SQLAlchemy. List enrichment is cache-only by default and
+batch-loads mapping/detail cache rows, so catalog pages make no remote calls and avoid
+per-movie database queries.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import current_app, has_app_context
 
 from database.db import db
-from database.models import MovieTmdbMapping
+from database.models import MovieTmdbMapping, TmdbEnrichmentCache
 from services.tmdb_service import (
     find_movie_by_external_id,
     find_tmdb_id_for_movie,
@@ -44,13 +45,11 @@ def _aware(value: Optional[datetime]) -> Optional[datetime]:
 
 
 def set_cache(cache_obj):
-    """Bind the Flask-Caching extension initialized by the application factory."""
     global _cache
     _cache = cache_obj
 
 
 def memoize_or_pass_through(timeout: int = 300):
-    """Create a memoized wrapper lazily after Flask-Caching has been initialized."""
     def decorator(func):
         cached_func = None
 
@@ -69,7 +68,6 @@ def memoize_or_pass_through(timeout: int = 300):
 
 
 def get_data_loader():
-    """Return the single DataLoader owned by the active Flask application."""
     if not has_app_context():
         raise RuntimeError("Movie services require a Flask application context")
     loader = getattr(current_app, "data_loader", None)
@@ -127,12 +125,9 @@ def get_all_movies(
         loader = get_data_loader()
         movies_df = loader.get_movies().copy()
         ascending = str(sort_order).lower() != "desc"
-
         if sort_by == "year" and "year" in movies_df.columns:
             movies_df = movies_df.sort_values(
-                ["year", "title"],
-                ascending=[ascending, True],
-                na_position="last",
+                ["year", "title"], ascending=[ascending, True], na_position="last"
             )
         elif sort_by == "rating":
             stats = loader.get_movie_rating_stats()
@@ -144,7 +139,6 @@ def get_all_movies(
             )
         else:
             movies_df = movies_df.sort_values("title", ascending=ascending, na_position="last")
-
         total = len(movies_df)
         offset = (page - 1) * per_page
         return movies_df.iloc[offset : offset + per_page].to_dict("records"), total
@@ -154,7 +148,6 @@ def get_all_movies(
 
 
 def get_movie_by_id(movie_id: int, with_tmdb: bool = True) -> Optional[Dict]:
-    """Return a local movie, refreshing TMDb only for detail-oriented calls."""
     try:
         movie = get_data_loader().get_movie_by_id(int(movie_id))
         if movie is None:
@@ -190,12 +183,9 @@ def get_movies_by_genre(
         loader = get_data_loader()
         frame = loader.get_movies_by_genre(str(genre)).copy()
         ascending = str(sort_order).lower() != "desc"
-
         if sort_by == "year" and "year" in frame.columns:
             frame = frame.sort_values(
-                ["year", "title"],
-                ascending=[ascending, True],
-                na_position="last",
+                ["year", "title"], ascending=[ascending, True], na_position="last"
             )
         elif sort_by == "rating":
             stats = loader.get_movie_rating_stats()
@@ -207,7 +197,6 @@ def get_movies_by_genre(
             )
         elif "title" in frame.columns:
             frame = frame.sort_values("title", ascending=ascending, na_position="last")
-
         total = len(frame)
         offset = (page - 1) * per_page
         return frame.iloc[offset : offset + per_page].to_dict("records"), total
@@ -219,8 +208,7 @@ def get_movies_by_genre(
 @memoize_or_pass_through(timeout=3600)
 def get_popular_movies(limit: int = 10) -> List[Dict]:
     try:
-        frame = get_data_loader().get_popular_movies(n=max(1, int(limit)))
-        return frame.to_dict("records")
+        return get_data_loader().get_popular_movies(n=max(1, int(limit))).to_dict("records")
     except Exception:
         logger.exception("Failed to get popular movies")
         return []
@@ -230,8 +218,7 @@ def get_popular_movies(limit: int = 10) -> List[Dict]:
 def get_high_rated_movies(limit: int = 10, min_ratings: int = 10) -> List[Dict]:
     try:
         frame = get_data_loader().get_high_rated_movies(
-            min_ratings=max(1, int(min_ratings)),
-            n=max(1, int(limit)),
+            min_ratings=max(1, int(min_ratings)), n=max(1, int(limit))
         )
         return frame.to_dict("records")
     except Exception:
@@ -246,10 +233,10 @@ def get_content_recommendations(movie_id: int, top_n: int = 10) -> List[Dict]:
     recommender = _get_recommender()
     if recommender is None:
         return _fallback_recommendations(movie_id, top_n)
-
     try:
-        recommendations = recommender.get_recommendations(movie_id, top_n=top_n)
-        return recommendations or _fallback_recommendations(movie_id, top_n)
+        return recommender.get_recommendations(movie_id, top_n=top_n) or _fallback_recommendations(
+            movie_id, top_n
+        )
     except ValueError:
         logger.info("Content recommendations unavailable for movie %s; using popular fallback", movie_id)
         return _fallback_recommendations(movie_id, top_n)
@@ -298,17 +285,15 @@ def _imdb_id(movie: Dict) -> Optional[str]:
     if text.startswith("tt") and text[2:].isdigit():
         return text
     digits = re.sub(r"\D", "", text)
-    if not digits:
-        return None
-    return "tt" + digits.zfill(7)
+    return "tt" + digits.zfill(7) if digits else None
 
 
 def _catalog_key(movie: Dict) -> str:
     title = str(movie.get("title", ""))
     clean_title = re.sub(r"\s*\(\d{4}\)$", "", title).strip().casefold()
-    year = movie.get("year") or _extract_year_from_title(title) or ""
+    parsed_year = _valid_int(movie.get("year")) or _extract_year_from_title(title) or ""
     direct_tmdb = _valid_int(movie.get("tmdb_id") or movie.get("tmdbId")) or ""
-    identity = f"{clean_title}|{year}|{_imdb_id(movie) or ''}|{direct_tmdb}"
+    identity = f"{clean_title}|{parsed_year}|{_imdb_id(movie) or ''}|{direct_tmdb}"
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
@@ -365,23 +350,23 @@ def _store_mapping(
 
 
 def get_tmdb_id_for_movie(movie: Dict, *, allow_remote: bool = True) -> Optional[int]:
-    """Resolve a local movie to TMDb, preferring durable/direct identifiers.
-
-    Cache-only callers never perform title/IMDb network resolution.  Expired resolved
-    mappings may still be used by cache-only list pages; detail requests refresh them.
-    Negative mappings are honored until their shorter expiry.
-    """
     local_movie_id = _valid_int(movie.get("movieId"))
     if local_movie_id is None:
         return None
     key = _catalog_key(movie)
 
     direct_tmdb = _valid_int(movie.get("tmdb_id") or movie.get("tmdbId"))
+    row = _mapping_row(local_movie_id)
     if direct_tmdb:
-        _store_mapping(local_movie_id, key, direct_tmdb, matched_by="catalog_tmdb_id")
+        if not (
+            row is not None
+            and row.catalog_key == key
+            and row.status == "resolved"
+            and row.tmdb_id == direct_tmdb
+        ):
+            _store_mapping(local_movie_id, key, direct_tmdb, matched_by="catalog_tmdb_id")
         return direct_tmdb
 
-    row = _mapping_row(local_movie_id)
     if row is not None and row.catalog_key == key:
         if row.status == "resolved" and row.tmdb_id:
             if _mapping_fresh(row) or not allow_remote:
@@ -418,53 +403,53 @@ def get_tmdb_id_for_movie(movie: Dict, *, allow_remote: bool = True) -> Optional
     return int(resolved_tmdb_id) if resolved_tmdb_id else None
 
 
+def _merge_tmdb_details(enriched: Dict, tmdb_id: int, details: Optional[Dict]) -> Dict:
+    enriched["tmdb_id"] = int(tmdb_id)
+    if not details:
+        return enriched
+    fields = {
+        "tmdb_poster_url": details.get("poster_url"),
+        "tmdb_backdrop_url": details.get("backdrop_url"),
+        "overview": details.get("overview"),
+        "release_date": details.get("release_date"),
+        "runtime": details.get("runtime"),
+        "vote_average": details.get("vote_average"),
+        "vote_count": details.get("vote_count"),
+        "popularity": details.get("popularity"),
+        "tmdb_genres": details.get("genres", []),
+        "director": details.get("director"),
+        "cast": details.get("cast", []),
+        "trailers": details.get("trailers", []),
+        "keywords": details.get("keywords", []),
+        "production_companies": details.get("production_companies", []),
+        "production_countries": details.get("production_countries", []),
+        "watch_providers": details.get("watch_providers", {}),
+    }
+    enriched.update({key: value for key, value in fields.items() if value is not None})
+    return enriched
+
+
 def enrich_movie_with_tmdb(
     movie: Dict,
     *,
     allow_remote: bool = True,
     allow_stale: bool = True,
 ) -> Dict:
-    """Return a local movie plus cached/refreshed TMDb metadata."""
     enriched = dict(movie)
     enriched.setdefault("tmdb_id", None)
     enriched.setdefault("tmdb_poster_url", None)
     enriched.setdefault("tmdb_backdrop_url", None)
-
     tmdb_id = get_tmdb_id_for_movie(movie, allow_remote=allow_remote)
     if not tmdb_id:
         return enriched
-    enriched["tmdb_id"] = tmdb_id
-
     try:
         details = get_movie_details(
-            tmdb_id,
-            allow_remote=allow_remote,
-            allow_stale=allow_stale,
+            tmdb_id, allow_remote=allow_remote, allow_stale=allow_stale
         )
-        if not details:
-            return enriched
-        fields = {
-            "tmdb_poster_url": details.get("poster_url"),
-            "tmdb_backdrop_url": details.get("backdrop_url"),
-            "overview": details.get("overview"),
-            "release_date": details.get("release_date"),
-            "runtime": details.get("runtime"),
-            "vote_average": details.get("vote_average"),
-            "vote_count": details.get("vote_count"),
-            "popularity": details.get("popularity"),
-            "tmdb_genres": details.get("genres", []),
-            "director": details.get("director"),
-            "cast": details.get("cast", []),
-            "trailers": details.get("trailers", []),
-            "keywords": details.get("keywords", []),
-            "production_companies": details.get("production_companies", []),
-            "production_countries": details.get("production_countries", []),
-            "watch_providers": details.get("watch_providers", {}),
-        }
-        enriched.update({key: value for key, value in fields.items() if value is not None})
-        return enriched
+        return _merge_tmdb_details(enriched, tmdb_id, details)
     except Exception:
         logger.exception("TMDb enrichment failed for movie %s", movie.get("movieId"))
+        enriched["tmdb_id"] = tmdb_id
         return enriched
 
 
@@ -476,40 +461,114 @@ def get_tmdb_similar_movies(movie_id: int, limit: int = 10) -> List[Dict]:
         return []
 
 
+def _cache_row_usable(row: TmdbEnrichmentCache) -> bool:
+    fetched_at = _aware(row.fetched_at)
+    if fetched_at is None:
+        return False
+    try:
+        stale_ttl = max(0, int(current_app.config.get("TMDB_STALE_CACHE_TTL", 2592000)))
+    except (TypeError, ValueError):
+        stale_ttl = 2592000
+    return _utcnow() - fetched_at <= timedelta(seconds=stale_ttl)
+
+
+def _cached_list_context(movies: List[Dict]) -> Tuple[Dict[int, int], Dict[int, Dict]]:
+    """Batch-load local->TMDb mappings and locale-specific detail payloads."""
+    if not has_app_context():
+        return {}, {}
+
+    local_ids = [
+        local_id
+        for local_id in (_valid_int(movie.get("movieId")) for movie in movies)
+        if local_id is not None
+    ]
+    if not local_ids:
+        return {}, {}
+
+    mappings = db.session.execute(
+        db.select(MovieTmdbMapping).where(MovieTmdbMapping.local_movie_id.in_(local_ids))
+    ).scalars().all()
+    mapping_by_local = {row.local_movie_id: row for row in mappings}
+
+    tmdb_by_local: Dict[int, int] = {}
+    for movie in movies:
+        local_id = _valid_int(movie.get("movieId"))
+        if local_id is None:
+            continue
+        direct_tmdb = _valid_int(movie.get("tmdb_id") or movie.get("tmdbId"))
+        if direct_tmdb:
+            tmdb_by_local[local_id] = direct_tmdb
+            continue
+        row = mapping_by_local.get(local_id)
+        if (
+            row is not None
+            and row.status == "resolved"
+            and row.tmdb_id
+            and row.catalog_key == _catalog_key(movie)
+        ):
+            tmdb_by_local[local_id] = int(row.tmdb_id)
+
+    tmdb_ids = sorted(set(tmdb_by_local.values()))
+    if not tmdb_ids:
+        return tmdb_by_local, {}
+
+    language = str(current_app.config.get("TMDB_LANGUAGE", "en-US")).strip() or "en-US"
+    region = str(current_app.config.get("TMDB_WATCH_REGION", "IN")).strip().upper() or "IN"
+    cache_rows = db.session.execute(
+        db.select(TmdbEnrichmentCache).where(
+            TmdbEnrichmentCache.tmdb_id.in_(tmdb_ids),
+            TmdbEnrichmentCache.language == language,
+            TmdbEnrichmentCache.region == region,
+        )
+    ).scalars().all()
+    details_by_tmdb = {
+        int(row.tmdb_id): dict(row.payload)
+        for row in cache_rows
+        if _cache_row_usable(row)
+    }
+    return tmdb_by_local, details_by_tmdb
+
+
 def enrich_movies_list(
     movies: List[Dict],
     with_tmdb: bool = True,
     *,
     allow_remote: bool = False,
 ) -> List[Dict]:
-    """Enrich a list from durable cache by default, never fanning out remote work.
-
-    Set ``allow_remote=True`` only for explicit cache-warming/admin workflows.  Normal
-    list pages intentionally use cached/stale data and placeholders for uncached movies.
-    """
     if not movies:
         return []
+    valid_movies = [dict(movie) for movie in movies if isinstance(movie, dict)]
     if not with_tmdb:
-        return [dict(movie) for movie in movies if isinstance(movie, dict)]
+        return valid_movies
 
-    per_call_cache: Dict[int, Dict] = {}
+    if allow_remote:
+        result = []
+        for movie in valid_movies:
+            enriched = enrich_movie_with_tmdb(movie, allow_remote=True, allow_stale=True)
+            if not enriched.get("tmdb_poster_url"):
+                enriched["tmdb_poster_url"] = "/static/img/movie-placeholder.jpg"
+            result.append(enriched)
+        return result
+
+    try:
+        tmdb_by_local, details_by_tmdb = _cached_list_context(valid_movies)
+    except Exception:
+        logger.exception("Batch TMDb cache lookup failed; rendering local list data")
+        tmdb_by_local, details_by_tmdb = {}, {}
+
     result = []
-    for movie in movies:
-        if not isinstance(movie, dict):
-            continue
+    for movie in valid_movies:
+        enriched = dict(movie)
+        enriched.setdefault("tmdb_id", None)
+        enriched.setdefault("tmdb_poster_url", None)
+        enriched.setdefault("tmdb_backdrop_url", None)
         local_id = _valid_int(movie.get("movieId"))
-        if local_id is None:
-            result.append(dict(movie))
-            continue
-        if local_id not in per_call_cache:
-            per_call_cache[local_id] = enrich_movie_with_tmdb(
-                movie,
-                allow_remote=allow_remote,
-                allow_stale=True,
-            )
-            if not per_call_cache[local_id].get("tmdb_poster_url"):
-                per_call_cache[local_id]["tmdb_poster_url"] = "/static/img/movie-placeholder.jpg"
-        result.append(dict(per_call_cache[local_id]))
+        tmdb_id = tmdb_by_local.get(local_id) if local_id is not None else None
+        if tmdb_id:
+            _merge_tmdb_details(enriched, tmdb_id, details_by_tmdb.get(tmdb_id))
+        if not enriched.get("tmdb_poster_url"):
+            enriched["tmdb_poster_url"] = "/static/img/movie-placeholder.jpg"
+        result.append(enriched)
     return result
 
 
@@ -523,11 +582,9 @@ def get_unique_genres() -> List[str]:
 
 
 def find_local_id_from_tmdb_id(tmdb_id: int) -> Optional[int]:
-    """Resolve TMDb->local identity from persisted mappings without catalog-wide API scans."""
     tmdb_id = _valid_int(tmdb_id)
     if tmdb_id is None:
         return None
-
     if has_app_context():
         try:
             mapping = db.session.execute(
