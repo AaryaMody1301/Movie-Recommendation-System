@@ -8,9 +8,10 @@ class Config:
     """Base application configuration."""
 
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Flask-SQLAlchemy resolves relative SQLite paths against Flask's instance path.
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         'DATABASE_URI',
-        'sqlite:///instance/movie_recommender.db',
+        'sqlite:///movie_recommender.db',
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
