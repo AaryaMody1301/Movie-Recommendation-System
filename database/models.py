@@ -1,4 +1,4 @@
-"""Database models for application users and their movie interactions."""
+"""Database models for application users, interactions, and durable TMDb metadata."""
 
 from datetime import datetime, timezone
 
@@ -96,3 +96,57 @@ class Watchlist(db.Model):
 
     def __repr__(self):
         return f"<Watchlist user_id={self.user_id} movie_id={self.movie_id}>"
+
+
+class MovieTmdbMapping(db.Model):
+    """Durable mapping between a local catalog movie ID and a TMDb movie ID.
+
+    ``catalog_key`` fingerprints the local title/year/external-ID inputs used for the
+    match.  If those catalog inputs change, the mapping is re-resolved instead of
+    silently trusting stale identity data.  ``status=not_found`` is a negative cache
+    entry and is intentionally assigned a shorter expiry by the service layer.
+    """
+
+    __tablename__ = "movie_tmdb_mappings"
+
+    local_movie_id = db.Column(db.Integer, primary_key=True)
+    tmdb_id = db.Column(db.Integer, nullable=True, index=True)
+    catalog_key = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="resolved", index=True)
+    matched_by = db.Column(db.String(32), nullable=True)
+    checked_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_utcnow)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+
+    def __repr__(self):
+        return (
+            f"<MovieTmdbMapping local_movie_id={self.local_movie_id} "
+            f"tmdb_id={self.tmdb_id} status={self.status}>"
+        )
+
+
+class TmdbEnrichmentCache(db.Model):
+    """Durable normalized TMDb detail/provider payload for one locale/region."""
+
+    __tablename__ = "tmdb_enrichment_cache"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "tmdb_id",
+            "language",
+            "region",
+            name="tmdb_enrichment_locale",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    tmdb_id = db.Column(db.Integer, nullable=False, index=True)
+    language = db.Column(db.String(16), nullable=False, default="en-US")
+    region = db.Column(db.String(8), nullable=False, default="IN")
+    payload = db.Column(db.JSON, nullable=False)
+    fetched_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_utcnow)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+
+    def __repr__(self):
+        return (
+            f"<TmdbEnrichmentCache tmdb_id={self.tmdb_id} "
+            f"language={self.language} region={self.region}>"
+        )
