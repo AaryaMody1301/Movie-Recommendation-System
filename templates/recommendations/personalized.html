@@ -1,14 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Personalized: {{ movie.title }}{% endblock %}
 {% block content %}
-<h1 class="h2 mb-1">Because you are viewing {{ movie.title }}</h1>
-<p class="text-muted mb-4">Similar movies adjusted with your persisted genre preferences · {{ strategy }} strategy.</p>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+  <div>
+    <h1 class="h2 mb-1">Because you are viewing {{ movie.title }}</h1>
+    <p class="text-muted mb-0">Content similarity adjusted with your persisted rating patterns.</p>
+  </div>
+  <div class="btn-group" role="group" aria-label="Recommendation strategy">
+    <a class="btn btn-sm {% if strategy == 'weighted' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('recommendations.personalized_movie_recommendations', movie_id=movie.movieId, page=1, per_page=per_page, strategy='weighted') }}">Weighted</a>
+    <a class="btn btn-sm {% if strategy == 'rank' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ url_for('recommendations.personalized_movie_recommendations', movie_id=movie.movieId, page=1, per_page=per_page, strategy='rank') }}">Rank fusion</a>
+  </div>
+</div>
 <div class="row g-4">
 {% for rec in recommendations %}
   <div class="col-md-6 col-lg-4"><div class="card h-100"><div class="card-body d-flex flex-column">
-    <h2 class="h5">{{ rec.movie.title }}</h2><p class="text-muted small">{{ rec.movie.genres }}</p><p class="small">{{ rec.reason }}</p>
-    {% if rec.score is not none %}<div class="small text-muted mb-3">Score: {{ "%.3f"|format(rec.score) }}</div>{% endif %}
-    <div class="mt-auto"><a class="btn btn-sm btn-primary" href="{{ url_for('movies.movie_detail', movie_id=rec.movie.movieId) }}">Details</a></div>
+    <h2 class="h5">{{ rec.movie.title }}</h2>
+    <p class="text-muted small">{{ rec.movie.genres }}</p>
+    <p class="small">{{ rec.reason }}</p>
+    {% if rec.signals is defined %}
+    <div class="d-flex flex-wrap gap-1 mb-2">
+      {% if rec.signals.content is not none %}<span class="badge text-bg-light border">Content {{ "%.2f"|format(rec.signals.content) }}</span>{% endif %}
+      {% if rec.signals.collaborative is not none %}<span class="badge text-bg-light border">Collaborative {{ "%.2f"|format(rec.signals.collaborative) }}</span>{% endif %}
+    </div>
+    {% endif %}
+    {% if rec.score is not none %}<div class="small text-muted mb-3">Hybrid score: {{ "%.3f"|format(rec.score) }}</div>{% endif %}
+    <div class="mt-auto d-flex gap-2">
+      <a class="btn btn-sm btn-primary" href="{{ url_for('movies.movie_detail', movie_id=rec.movie.movieId) }}">Details</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('recommendations.recommendation_explanation', movie_id=rec.movie.movieId, source_id=movie.movieId) }}">Why?</a>
+    </div>
   </div></div></div>
 {% else %}<div class="col-12"><div class="alert alert-info">No personalized matches were found.</div></div>{% endfor %}
 </div>

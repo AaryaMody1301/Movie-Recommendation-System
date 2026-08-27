@@ -7,6 +7,15 @@
 <div class="alert alert-warning">{{ explanation.error }}</div>
 {% else %}
 <ul class="list-group mb-4">{% for reason in explanation.reasons %}<li class="list-group-item">{{ reason }}</li>{% endfor %}</ul>
+{% if explanation.signals is defined %}
+<div class="card mb-4"><div class="card-body">
+  <h2 class="h5">Recommendation signals</h2>
+  <dl class="row mb-0">
+    <dt class="col-sm-5">Content similarity</dt><dd class="col-sm-7">{% if explanation.signals.content is not none %}{{ "%.3f"|format(explanation.signals.content) }}{% else %}<span class="text-muted">Not available</span>{% endif %}</dd>
+    <dt class="col-sm-5">Collaborative predicted rating</dt><dd class="col-sm-7">{% if explanation.signals.collaborative_prediction is not none %}{{ "%.2f"|format(explanation.signals.collaborative_prediction) }}/5{% else %}<span class="text-muted">Not enough shared rating evidence</span>{% endif %}</dd>
+  </dl>
+</div></div>
+{% endif %}
 {% if explanation.genre_match %}<h2 class="h5">Your matching genres</h2><div class="mb-4">{% for item in explanation.genre_match %}<span class="badge text-bg-secondary me-1">{{ item.genre }}</span>{% endfor %}</div>{% endif %}
 {% endif %}
 <a class="btn btn-primary" href="{{ url_for('movies.movie_detail', movie_id=movie.movieId) }}">View movie</a>
