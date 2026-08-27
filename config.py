@@ -31,6 +31,8 @@ class Config:
         'instance/embeddings_cache.pkl',
     )
     EMBEDDING_BATCH_SIZE = int(os.environ.get('EMBEDDING_BATCH_SIZE', '32'))
+    # Retained for offline model-training/export tooling. Online collaborative
+    # personalization is trained lazily from persisted SQLAlchemy ratings.
     COLLAB_MODEL_PATH = os.environ.get(
         'COLLAB_MODEL_PATH',
         'instance/collaborative_model.pkl',
@@ -42,6 +44,14 @@ class Config:
     TEST_SIZE = float(os.environ.get('TEST_SIZE', '0.2'))
     RANDOM_STATE = int(os.environ.get('RANDOM_STATE', '42'))
     N_FACTORS = int(os.environ.get('N_FACTORS', '100'))
+    COLLAB_N_EPOCHS = int(os.environ.get('COLLAB_N_EPOCHS', '20'))
+    COLLAB_LR_ALL = float(os.environ.get('COLLAB_LR_ALL', '0.005'))
+    COLLAB_REG_ALL = float(os.environ.get('COLLAB_REG_ALL', '0.02'))
+    COLLAB_MIN_RATINGS = int(os.environ.get('COLLAB_MIN_RATINGS', '5'))
+    COLLAB_MIN_USERS = int(os.environ.get('COLLAB_MIN_USERS', '2'))
+    COLLAB_MIN_ITEMS = int(os.environ.get('COLLAB_MIN_ITEMS', '2'))
+    COLLAB_CANDIDATE_POOL = int(os.environ.get('COLLAB_CANDIDATE_POOL', '200'))
+    PERSONALIZATION_MIN_RATING = float(os.environ.get('PERSONALIZATION_MIN_RATING', '3.5'))
     TRANSFORMER_MODEL = os.environ.get(
         'TRANSFORMER_MODEL',
         'sentence-transformers/all-MiniLM-L6-v2',
