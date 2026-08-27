@@ -1,8 +1,6 @@
 """Database models for application users and their movie interactions."""
 
-from datetime import datetime, timedelta, timezone
-import hashlib
-import secrets
+from datetime import datetime, timezone
 
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -25,8 +23,6 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=_utcnow)
     last_login = db.Column(db.DateTime(timezone=True), nullable=True)
-    reset_token_hash = db.Column(db.String(64), nullable=True, index=True)
-    reset_token_expires_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     ratings = db.relationship(
         "Rating",
@@ -46,25 +42,6 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
-
-    def issue_reset_token(self, lifetime=timedelta(hours=24)):
-        token = secrets.token_urlsafe(32)
-        self.reset_token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        self.reset_token_expires_at = _utcnow() + lifetime
-        return token
-
-    def verify_reset_token(self, token):
-        if not token or not self.reset_token_hash or not self.reset_token_expires_at:
-            return False
-        expires_at = self.reset_token_expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        return secrets.compare_digest(token_hash, self.reset_token_hash) and _utcnow() < expires_at
-
-    def clear_reset_token(self):
-        self.reset_token_hash = None
-        self.reset_token_expires_at = None
 
     def __repr__(self):
         return f"<User {self.username}>"
