@@ -4,7 +4,10 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/movie-placeholder.css') }}" />
 {% endblock %}
 {% block content %}
-<h2 class="mb-4">{{ genre }} Movies</h2>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+  <h2 class="mb-0">{{ genre }} Movies</h2>
+  {% if pagination %}<span class="text-muted">{{ pagination.total }} movie{% if pagination.total != 1 %}s{% endif %}</span>{% endif %}
+</div>
 
 {% if movies %}
 <div class="row row-cols-1 row-cols-md-4 g-4">
@@ -28,5 +31,19 @@
 </div>
 {% else %}
 <div class="alert alert-info animate__animated animate__fadeInUp mt-4" role="alert">No movies found in the {{ genre }} genre.</div>
+{% endif %}
+
+{% if pagination and pagination.pages > 1 %}
+<nav class="mt-4" aria-label="Genre result pages">
+  <ul class="pagination justify-content-center align-items-center">
+    <li class="page-item {% if pagination.page <= 1 %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for('movies.genre', genre=genre, page=pagination.page - 1, sort_by=pagination.sort_by, sort_order=pagination.sort_order) if pagination.page > 1 else '#' }}">Previous</a>
+    </li>
+    <li class="page-item disabled"><span class="page-link">Page {{ pagination.page }} of {{ pagination.pages }}</span></li>
+    <li class="page-item {% if pagination.page >= pagination.pages %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for('movies.genre', genre=genre, page=pagination.page + 1, sort_by=pagination.sort_by, sort_order=pagination.sort_order) if pagination.page < pagination.pages else '#' }}">Next</a>
+    </li>
+  </ul>
+</nav>
 {% endif %}
 {% endblock %}

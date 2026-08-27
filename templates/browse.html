@@ -5,7 +5,10 @@
 {% endblock %}
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-  <h1 class="h2 mb-0">Browse Movies</h1>
+  <div>
+    <h1 class="h2 mb-1">Browse Movies</h1>
+    {% if pagination %}<div class="text-muted">{{ pagination.total }} movie{% if pagination.total != 1 %}s{% endif %}</div>{% endif %}
+  </div>
   <form method="get" class="d-flex flex-wrap gap-2">
     <select class="form-select" name="genre" aria-label="Genre">
       <option value="">All genres</option>
@@ -45,5 +48,19 @@
 </div>
 {% else %}
 <div class="alert alert-info">No movies matched the current filters.</div>
+{% endif %}
+
+{% if pagination and pagination.pages > 1 %}
+<nav class="mt-4" aria-label="Browse movie pages">
+  <ul class="pagination justify-content-center align-items-center">
+    <li class="page-item {% if pagination.page <= 1 %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for('movies.browse', page=pagination.page - 1, genre=current_genre, sort_by=sort_by, sort_order=sort_order) if pagination.page > 1 else '#' }}">Previous</a>
+    </li>
+    <li class="page-item disabled"><span class="page-link">Page {{ pagination.page }} of {{ pagination.pages }}</span></li>
+    <li class="page-item {% if pagination.page >= pagination.pages %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for('movies.browse', page=pagination.page + 1, genre=current_genre, sort_by=sort_by, sort_order=sort_order) if pagination.page < pagination.pages else '#' }}">Next</a>
+    </li>
+  </ul>
+</nav>
 {% endif %}
 {% endblock %}

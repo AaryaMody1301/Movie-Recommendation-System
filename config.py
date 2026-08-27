@@ -26,6 +26,11 @@ class Config:
         'CONTENT_MODEL_PATH',
         'instance/content_model.pkl',
     )
+    EMBEDDINGS_CACHE_PATH = os.environ.get(
+        'EMBEDDINGS_CACHE_PATH',
+        'instance/embeddings_cache.pkl',
+    )
+    EMBEDDING_BATCH_SIZE = int(os.environ.get('EMBEDDING_BATCH_SIZE', '32'))
     COLLAB_MODEL_PATH = os.environ.get(
         'COLLAB_MODEL_PATH',
         'instance/collaborative_model.pkl',
@@ -41,7 +46,6 @@ class Config:
         'TRANSFORMER_MODEL',
         'sentence-transformers/all-MiniLM-L6-v2',
     )
-    MAX_EMBEDDING_MOVIES = int(os.environ.get('MAX_EMBEDDING_MOVIES', '1000'))
 
     TMDB_API_KEY = os.environ.get('TMDB_API_KEY')
     TMDB_REQUEST_TIMEOUT = float(os.environ.get('TMDB_REQUEST_TIMEOUT', '10'))

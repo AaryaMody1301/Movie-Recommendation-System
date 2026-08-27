@@ -33,30 +33,40 @@ login_manager.login_message_category = "info"
 
 
 def _initialize_recommender(app, embedding_args):
-    """Initialize the app-scoped data loader and content recommender."""
+    """Initialize the catalog first, then attach the optional content recommender."""
     settings = {
         "rebuild_embeddings": False,
-        "max_movies": app.config.get("MAX_EMBEDDING_MOVIES", 1000),
+        "batch_size": app.config.get("EMBEDDING_BATCH_SIZE", 32),
+        "cache_path": app.config.get("EMBEDDINGS_CACHE_PATH", "instance/embeddings_cache.pkl"),
     }
     if embedding_args:
         settings.update({key: value for key, value in embedding_args.items() if value is not None})
 
-    max_movies = settings.get("max_movies")
-    if not isinstance(max_movies, int) or max_movies <= 0:
-        max_movies = app.config.get("MAX_EMBEDDING_MOVIES", 1000)
+    try:
+        batch_size = max(1, int(settings.get("batch_size", 32)))
+    except (TypeError, ValueError):
+        batch_size = 32
 
     try:
         app.data_loader = DataLoader(
             movies_path=app.config["MOVIES_CSV"],
             ratings_path=app.config.get("RATINGS_CSV"),
         )
-        movies_df = app.data_loader.get_movies()
+    except Exception:
+        logger.exception("Catalog data initialization failed")
+        app.data_loader = None
+        app.recommender = None
+        return
 
-        required_columns = {"movieId", "title", "genres", "clean_title", "overview"}
-        if not required_columns.issubset(movies_df.columns):
-            missing = sorted(required_columns.difference(movies_df.columns))
-            raise ValueError(f"Movies dataset is missing required columns: {missing}")
+    movies_df = app.data_loader.get_movies()
+    required_columns = {"movieId", "title", "genres", "clean_title", "overview"}
+    if not required_columns.issubset(movies_df.columns):
+        missing = sorted(required_columns.difference(movies_df.columns))
+        logger.error("Movies dataset is missing required columns: %s", missing)
+        app.recommender = None
+        return
 
+    try:
         app.recommender = ContentBasedRecommender(
             transformer_model=app.config.get(
                 "TRANSFORMER_MODEL",
@@ -65,12 +75,14 @@ def _initialize_recommender(app, embedding_args):
         )
         app.recommender.fit(
             movies_df,
-            max_items=max_movies,
             force_rebuild=bool(settings.get("rebuild_embeddings", False)),
+            cache_path=str(settings.get("cache_path") or app.config["EMBEDDINGS_CACHE_PATH"]),
+            batch_size=batch_size,
         )
     except Exception:
-        logger.exception("Data/recommender initialization failed")
-        app.data_loader = None
+        logger.exception(
+            "Content recommender initialization failed; catalog browsing remains available"
+        )
         app.recommender = None
 
 
@@ -79,10 +91,8 @@ def create_app(test_config=None, embedding_args=None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(get_config())
 
-    # Optional instance-specific overrides apply to normal runtime configuration.
     app.config.from_pyfile("config.py", silent=True)
 
-    # Explicit test configuration must win over both environment and instance files.
     if test_config:
         app.config.from_mapping(test_config)
 

@@ -78,26 +78,57 @@ def _extract_year_from_title(title: str) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
+def _validate_page(page: int, per_page: int) -> Tuple[int, int]:
+    return max(1, int(page)), min(100, max(1, int(per_page)))
+
+
+def _fallback_recommendations(movie_id: int, top_n: int) -> List[Dict]:
+    """Return popular movies in the same shape as model recommendations."""
+    limit = max(1, int(top_n))
+    popular = get_popular_movies(limit=limit + 1)
+    recommendations = []
+    for movie in popular:
+        if movie.get("movieId") == int(movie_id):
+            continue
+        recommendations.append(
+            {
+                "movie": dict(movie),
+                "score": 0.0,
+                "reason": "Popular fallback while content similarity is unavailable.",
+            }
+        )
+        if len(recommendations) >= limit:
+            break
+    return recommendations
+
+
 def get_all_movies(
     page: int = 1,
     per_page: int = 24,
     sort_by: str = "title",
     sort_order: str = "asc",
 ) -> Tuple[List[Dict], int]:
-    """Return catalog movies with validated pagination and sorting."""
+    """Return catalog movies with pagination and sorting over the full catalog."""
     try:
-        page = max(1, int(page))
-        per_page = min(100, max(1, int(per_page)))
-        movies_df = get_data_loader().get_movies().copy()
+        page, per_page = _validate_page(page, per_page)
+        loader = get_data_loader()
+        movies_df = loader.get_movies().copy()
         ascending = str(sort_order).lower() != "desc"
 
         if sort_by == "year" and "year" in movies_df.columns:
-            movies_df = movies_df.sort_values("year", ascending=ascending, na_position="last")
+            movies_df = movies_df.sort_values(
+                ["year", "title"],
+                ascending=[ascending, True],
+                na_position="last",
+            )
         elif sort_by == "rating":
-            # Baseline rating sort remains delegated to DataLoader until Phase 4.
-            movies_df = get_data_loader().get_high_rated_movies(n=len(movies_df))
-            if ascending:
-                movies_df = movies_df.iloc[::-1]
+            stats = loader.get_movie_rating_stats()
+            movies_df = movies_df.merge(stats, on="movieId", how="left")
+            movies_df = movies_df.sort_values(
+                ["average_rating", "rating_count", "title"],
+                ascending=[ascending, ascending, True],
+                na_position="last",
+            )
         else:
             movies_df = movies_df.sort_values("title", ascending=ascending, na_position="last")
 
@@ -123,14 +154,9 @@ def get_movie_by_id(movie_id: int, with_tmdb: bool = True) -> Optional[Dict]:
 
 
 def search_movies(query: str, page: int = 1, per_page: int = 24) -> Tuple[List[Dict], int]:
-    """Search the catalog using the DataLoader public API.
-
-    DataLoader search semantics are intentionally unchanged until Phase 4; this layer
-    only validates pagination and provides a stable service return type.
-    """
+    """Search all titles literally, then paginate the complete result set."""
     try:
-        page = max(1, int(page))
-        per_page = min(100, max(1, int(per_page)))
+        page, per_page = _validate_page(page, per_page)
         results = get_data_loader().search_movies(str(query))
         total = len(results)
         offset = (page - 1) * per_page
@@ -147,16 +173,27 @@ def get_movies_by_genre(
     sort_by: str = "title",
     sort_order: str = "asc",
 ) -> Tuple[List[Dict], int]:
-    """Return genre-filtered catalog movies using the DataLoader public API."""
+    """Filter by an exact genre token, then sort and paginate the full result set."""
     try:
-        page = max(1, int(page))
-        per_page = min(100, max(1, int(per_page)))
-        frame = get_data_loader().get_movies_by_genre(str(genre)).copy()
+        page, per_page = _validate_page(page, per_page)
+        loader = get_data_loader()
+        frame = loader.get_movies_by_genre(str(genre)).copy()
         ascending = str(sort_order).lower() != "desc"
+
         if sort_by == "year" and "year" in frame.columns:
-            frame = frame.sort_values("year", ascending=ascending, na_position="last")
-        elif sort_by == "rating" and "average_rating" in frame.columns:
-            frame = frame.sort_values("average_rating", ascending=ascending, na_position="last")
+            frame = frame.sort_values(
+                ["year", "title"],
+                ascending=[ascending, True],
+                na_position="last",
+            )
+        elif sort_by == "rating":
+            stats = loader.get_movie_rating_stats()
+            frame = frame.merge(stats, on="movieId", how="left")
+            frame = frame.sort_values(
+                ["average_rating", "rating_count", "title"],
+                ascending=[ascending, ascending, True],
+                na_position="last",
+            )
         elif "title" in frame.columns:
             frame = frame.sort_values("title", ascending=ascending, na_position="last")
 
@@ -193,19 +230,24 @@ def get_high_rated_movies(limit: int = 10, min_ratings: int = 10) -> List[Dict]:
 
 @memoize_or_pass_through(timeout=600)
 def get_content_recommendations(movie_id: int, top_n: int = 10) -> List[Dict]:
-    """Return recommendations from the one app-owned content recommender."""
+    """Return normalized recommendations from the app-owned content recommender."""
+    movie_id = int(movie_id)
+    top_n = max(1, int(top_n))
     recommender = _get_recommender()
     if recommender is None:
-        return get_popular_movies(top_n)
+        return _fallback_recommendations(movie_id, top_n)
+
     try:
-        recommendations = recommender.get_recommendations(int(movie_id), top_n=max(1, int(top_n)))
-        return recommendations or get_popular_movies(top_n)
+        recommendations = recommender.get_recommendations(movie_id, top_n=top_n)
+        if recommendations:
+            return recommendations
+        return _fallback_recommendations(movie_id, top_n)
     except ValueError:
-        logger.info("Movie %s is outside the current embedding index; using popular fallback", movie_id)
-        return get_popular_movies(top_n)
+        logger.info("Content recommendations unavailable for movie %s; using popular fallback", movie_id)
+        return _fallback_recommendations(movie_id, top_n)
     except Exception:
         logger.exception("Failed to get content recommendations for movie %s", movie_id)
-        return get_popular_movies(top_n)
+        return _fallback_recommendations(movie_id, top_n)
 
 
 def update_movie_metadata(movie_id: int, metadata: Dict[str, Any]) -> bool:
