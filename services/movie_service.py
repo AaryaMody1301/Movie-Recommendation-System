@@ -1,624 +1,355 @@
-"""
-Movie service for handling movie operations.
+"""Canonical movie catalog service.
 
-This module provides functions to fetch, search, and filter movies from the dataset.
-It also integrates with TMDb API for enhanced movie data.
+The Flask application owns exactly one ``DataLoader`` and one content recommender.
+This module never creates independent loader/model instances; services therefore see
+the same catalog and baseline ratings throughout a request/application context.
 """
+
+from __future__ import annotations
+
+from functools import wraps
 import logging
-import os
-import pandas as pd
-import numpy as np
 import re
-from typing import List, Dict, Optional, Tuple, Any, Callable
-from flask import current_app, g
-# from recommendation import ContentBasedRecommender # Old import
-from models.content_based import ContentBasedRecommender # Import the SentenceTransformer recommender
+from typing import Any, Dict, List, Optional, Tuple
+
+from flask import current_app, has_app_context
+
 from services.tmdb_service import (
-    find_tmdb_id_for_movie, 
-    get_movie_details, 
+    find_tmdb_id_for_movie,
+    get_movie_details,
+    get_similar_movies as get_tmdb_similar_movies_api,
     get_watch_providers,
-    get_similar_movies as get_tmdb_similar_movies_api # Renamed to avoid conflict
 )
 
-# Setup logger
 logger = logging.getLogger(__name__)
 
-# Import cache object from app
-cache = None
+_cache = None
+_TMDB_ID_CACHE: Dict[int, int] = {}
+
 
 def set_cache(cache_obj):
-    """Set the cache object from the Flask app."""
-    global cache
-    cache = cache_obj
+    """Bind the Flask-Caching extension initialized by the application factory."""
+    global _cache
+    _cache = cache_obj
 
-# Define a cache decorator fallback for when cache is None
-def memoize_or_pass_through(timeout=300):
-    """
-    Decorator that will use cache.memoize if available, otherwise just return the original function.
-    This handles the case when cache is None.
-    """
+
+def memoize_or_pass_through(timeout: int = 300):
+    """Create a memoized wrapper lazily after Flask-Caching has been initialized."""
     def decorator(func):
-        if cache is not None:
-            return cache.memoize(timeout=timeout)(func)
-        else:
-            return func
+        cached_func = None
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            nonlocal cached_func
+            if _cache is None:
+                return func(*args, **kwargs)
+            if cached_func is None:
+                cached_func = _cache.memoize(timeout=timeout)(func)
+            return cached_func(*args, **kwargs)
+
+        return wrapper
+
     return decorator
 
-# DataLoader singleton for fast access
-_DATA_LOADER = None
 
 def get_data_loader():
-    global _DATA_LOADER
-    if _DATA_LOADER is None:
-        from data.data_loader import DataLoader
-        _DATA_LOADER = DataLoader(
-            movies_path=os.environ.get('MOVIES_CSV', 'data/movies.csv'),
-            ratings_path=os.environ.get('RATINGS_CSV', 'data/ratings.csv')
-        )
-    return _DATA_LOADER
+    """Return the single DataLoader owned by the active Flask application."""
+    if not has_app_context():
+        raise RuntimeError("Movie services require a Flask application context")
+    loader = getattr(current_app, "data_loader", None)
+    if loader is None:
+        raise RuntimeError("Application DataLoader is not available")
+    return loader
 
-# Global instance for the recommender
-_RECOMMENDER = None
-
-# Dictionary to cache TMDb IDs (movieId -> tmdb_id)
-_TMDB_ID_CACHE = {}
-
-def _extract_year_from_title(title):
-    """Extract the year from a movie title if present in parentheses."""
-    year_match = re.search(r'\((\d{4})\)$', title)
-    if year_match:
-        return int(year_match.group(1))
-    return None
 
 def _get_data_loader():
+    """Compatibility alias for legacy callers."""
     return get_data_loader()
 
-def _get_recommender() -> Optional[ContentBasedRecommender]:
-    """
-    Get the ContentBasedRecommender instance from Flask's g object.
-    It should be initialized in create_app.
-    """
-    if 'recommender' not in g:
-        logger.error("ContentBasedRecommender not found in g. It should be initialized in create_app.")
-        return None
-    return g.recommender
 
-def get_all_movies(page: int = 1, per_page: int = 24, 
-                   sort_by: str = 'title', sort_order: str = 'asc') -> Tuple[List[Dict], int]:
-    """
-    Get all movies with pagination and sorting.
-    
-    Args:
-        page: Page number (1-indexed)
-        per_page: Number of items per page
-        sort_by: Column to sort by ('title', 'year', 'rating')
-        sort_order: Sort order ('asc' or 'desc')
-        
-    Returns:
-        Tuple of (list of movie dictionaries, total count)
-    """
+def _get_recommender():
+    if not has_app_context():
+        raise RuntimeError("Recommendation services require a Flask application context")
+    return getattr(current_app, "recommender", None)
+
+
+def _extract_year_from_title(title: str) -> Optional[int]:
+    match = re.search(r"\((\d{4})\)$", title or "")
+    return int(match.group(1)) if match else None
+
+
+def get_all_movies(
+    page: int = 1,
+    per_page: int = 24,
+    sort_by: str = "title",
+    sort_order: str = "asc",
+) -> Tuple[List[Dict], int]:
+    """Return catalog movies with validated pagination and sorting."""
     try:
-        # Get DataLoader
-        data_loader = _get_data_loader()
-        
-        # Get movies DataFrame
-        movies_df = data_loader.get_movies()
-        
-        # Apply sorting
-        sort_ascending = sort_order.lower() != 'desc'
-        
-        if sort_by == 'year' and 'year' in movies_df.columns:
-            movies_df = movies_df.sort_values('year', ascending=sort_ascending)
-        elif sort_by == 'rating' and hasattr(data_loader, 'get_high_rated_movies'):
-            # This sorts by average rating - might need adjustment based on your DataLoader
-            movies_df = data_loader.get_high_rated_movies(n=len(movies_df))
-            if not sort_ascending:
+        page = max(1, int(page))
+        per_page = min(100, max(1, int(per_page)))
+        movies_df = get_data_loader().get_movies().copy()
+        ascending = str(sort_order).lower() != "desc"
+
+        if sort_by == "year" and "year" in movies_df.columns:
+            movies_df = movies_df.sort_values("year", ascending=ascending, na_position="last")
+        elif sort_by == "rating":
+            # Baseline rating sort remains delegated to DataLoader until Phase 4.
+            movies_df = get_data_loader().get_high_rated_movies(n=len(movies_df))
+            if ascending:
                 movies_df = movies_df.iloc[::-1]
-        else:  # Default to title
-            movies_df = movies_df.sort_values('title', ascending=sort_ascending)
-        
-        # Get total count
+        else:
+            movies_df = movies_df.sort_values("title", ascending=ascending, na_position="last")
+
         total = len(movies_df)
-        
-        # Apply pagination
         offset = (page - 1) * per_page
-        movies_df = movies_df.iloc[offset:offset + per_page]
-        
-        # Convert to list of dictionaries
-        movies_list = movies_df.to_dict('records')
-        
-        return movies_list, total
-        
-    except Exception as e:
-        logger.error(f"Error getting all movies: {str(e)}")
+        return movies_df.iloc[offset : offset + per_page].to_dict("records"), total
+    except Exception:
+        logger.exception("Failed to get catalog movies")
         return [], 0
 
 
 def get_movie_by_id(movie_id: int, with_tmdb: bool = True) -> Optional[Dict]:
-    """
-    Get a movie by its ID, optionally enriched with TMDb data.
-    
-    Args:
-        movie_id: Movie ID
-        with_tmdb: Whether to include TMDb data
-        
-    Returns:
-        Movie dictionary or None if not found
-    """
+    """Return a local movie record, optionally enriched with TMDb metadata."""
     try:
-        # Get DataLoader
-        data_loader = _get_data_loader()
-        
-        # Get movie by ID
-        movie = data_loader.get_movie_by_id(movie_id)
-        
-        # Return as dictionary if found
-        if movie is not None:
-            movie_dict = movie.to_dict()
-            
-            # Enrich with TMDb data if requested
-            if with_tmdb:
-                movie_dict = enrich_movie_with_tmdb(movie_dict)
-            
-            return movie_dict
-        else:
-            logger.warning(f"Movie with ID {movie_id} not found")
+        movie = get_data_loader().get_movie_by_id(int(movie_id))
+        if movie is None:
             return None
-            
-    except Exception as e:
-        logger.error(f"Error getting movie {movie_id}: {str(e)}")
+        result = movie.to_dict()
+        return enrich_movie_with_tmdb(result) if with_tmdb else result
+    except Exception:
+        logger.exception("Failed to get movie %s", movie_id)
         return None
 
 
 def search_movies(query: str, page: int = 1, per_page: int = 24) -> Tuple[List[Dict], int]:
-    """
-    Search movies by title or other fields.
-    
-    Args:
-        query: Search query
-        page: Page number (1-indexed)
-        per_page: Number of items per page
-        
-    Returns:
-        Tuple of (list of movie dictionaries, total count)
+    """Search the catalog using the DataLoader public API.
+
+    DataLoader search semantics are intentionally unchanged until Phase 4; this layer
+    only validates pagination and provides a stable service return type.
     """
     try:
-        # Get DataLoader
-        data_loader = _get_data_loader()
-        
-        # Search movies
-        search_results = data_loader.search_movies(query)
-        
-        # Get total count
-        total = len(search_results)
-        
-        # Apply pagination
+        page = max(1, int(page))
+        per_page = min(100, max(1, int(per_page)))
+        results = get_data_loader().search_movies(str(query))
+        total = len(results)
         offset = (page - 1) * per_page
-        search_results = search_results.iloc[offset:offset + per_page]
-        
-        # Convert to list of dictionaries
-        movies_list = search_results.to_dict('records')
-        
-        return movies_list, total
-        
-    except Exception as e:
-        logger.error(f"Error searching movies for '{query}': {str(e)}")
+        return results.iloc[offset : offset + per_page].to_dict("records"), total
+    except Exception:
+        logger.exception("Failed to search movies for %r", query)
         return [], 0
 
 
-def get_movies_by_genre(genre: str, page: int = 1, per_page: int = 24,
-                        sort_by: str = 'title', sort_order: str = 'asc') -> Tuple[List[Dict], int]:
-    """
-    Get movies by genre with pagination and sorting.
-    
-    Args:
-        genre: Genre to filter by
-        page: Page number (1-indexed)
-        per_page: Number of items per page
-        sort_by: Column to sort by ('title', 'year', 'rating')
-        sort_order: Sort order ('asc' or 'desc')
-        
-    Returns:
-        Tuple of (list of movie dictionaries, total count)
-    """
+def get_movies_by_genre(
+    genre: str,
+    page: int = 1,
+    per_page: int = 24,
+    sort_by: str = "title",
+    sort_order: str = "asc",
+) -> Tuple[List[Dict], int]:
+    """Return genre-filtered catalog movies using the DataLoader public API."""
     try:
-        data_loader = _get_data_loader()
-        
-        # Get movies by genre using DataLoader method
-        genre_movies_df = data_loader.get_movies_by_genre(genre)
-        
-        # Apply sorting (handle potential missing columns)
-        sort_ascending = sort_order.lower() != 'desc'
-        
-        # Determine the actual column name for sorting rating (could be avg_rating etc.)
-        rating_col = None
-        if sort_by == 'rating':
-            if 'average_rating' in genre_movies_df.columns:
-                rating_col = 'average_rating'
-            elif 'avg_rating' in genre_movies_df.columns:
-                rating_col = 'avg_rating'
-            # Add more potential rating column names if needed
+        page = max(1, int(page))
+        per_page = min(100, max(1, int(per_page)))
+        frame = get_data_loader().get_movies_by_genre(str(genre)).copy()
+        ascending = str(sort_order).lower() != "desc"
+        if sort_by == "year" and "year" in frame.columns:
+            frame = frame.sort_values("year", ascending=ascending, na_position="last")
+        elif sort_by == "rating" and "average_rating" in frame.columns:
+            frame = frame.sort_values("average_rating", ascending=ascending, na_position="last")
+        elif "title" in frame.columns:
+            frame = frame.sort_values("title", ascending=ascending, na_position="last")
 
-        if sort_by == 'year' and 'year' in genre_movies_df.columns:
-            genre_movies_df = genre_movies_df.sort_values('year', ascending=sort_ascending, na_position='last')
-        elif rating_col:
-            genre_movies_df = genre_movies_df.sort_values(rating_col, ascending=sort_ascending, na_position='last')
-        else:  # Default to title
-            # Ensure title column exists before sorting
-            if 'title' in genre_movies_df.columns:
-                 genre_movies_df = genre_movies_df.sort_values('title', ascending=sort_ascending, na_position='last')
-            else:
-                 logger.warning("Cannot sort by title: 'title' column missing.")
-
-        # Get total count before pagination
-        total = len(genre_movies_df)
-
-        # Apply pagination
+        total = len(frame)
         offset = (page - 1) * per_page
-        genre_movies_df = genre_movies_df.iloc[offset:offset + per_page]
-        
-        # Convert to list of dictionaries
-        movies_list = genre_movies_df.to_dict('records')
-        
-        return movies_list, total
-        
-    except Exception as e:
-        logger.error(f"Error getting movies for genre '{genre}': {str(e)}")
+        return frame.iloc[offset : offset + per_page].to_dict("records"), total
+    except Exception:
+        logger.exception("Failed to get movies for genre %r", genre)
         return [], 0
 
 
-@memoize_or_pass_through(timeout=3600) # Cache popular movies for 1 hour
+@memoize_or_pass_through(timeout=3600)
 def get_popular_movies(limit: int = 10) -> List[Dict]:
-    """
-    Get popular movies based on number of ratings or other popularity metrics.
-    
-    Args:
-        limit: Maximum number of movies to return
-        
-    Returns:
-        List of movie dictionaries
-    """
     try:
-        data_loader = _get_data_loader()
-        popular_movies_df = data_loader.get_popular_movies(n=limit)
-        return popular_movies_df.to_dict('records')
-    except Exception as e:
-        logger.error(f"Error getting popular movies: {str(e)}")
+        frame = get_data_loader().get_popular_movies(n=max(1, int(limit)))
+        return frame.to_dict("records")
+    except Exception:
+        logger.exception("Failed to get popular movies")
         return []
 
 
-@memoize_or_pass_through(timeout=3600) # Cache high-rated movies for 1 hour
+@memoize_or_pass_through(timeout=3600)
 def get_high_rated_movies(limit: int = 10, min_ratings: int = 10) -> List[Dict]:
-    """
-    Get high-rated movies based on average rating and minimum rating count.
-    
-    Args:
-        limit: Maximum number of movies to return
-        min_ratings: Minimum number of ratings required
-        
-    Returns:
-        List of movie dictionaries
-    """
     try:
-        data_loader = _get_data_loader()
-        high_rated_movies_df = data_loader.get_high_rated_movies(min_ratings=min_ratings, n=limit)
-        return high_rated_movies_df.to_dict('records')
-    except Exception as e:
-        logger.error(f"Error getting high-rated movies: {str(e)}")
+        frame = get_data_loader().get_high_rated_movies(
+            min_ratings=max(1, int(min_ratings)),
+            n=max(1, int(limit)),
+        )
+        return frame.to_dict("records")
+    except Exception:
+        logger.exception("Failed to get high-rated movies")
         return []
 
 
-@memoize_or_pass_through(timeout=600) # Cache recommendations for 10 minutes
+@memoize_or_pass_through(timeout=600)
 def get_content_recommendations(movie_id: int, top_n: int = 10) -> List[Dict]:
-    """
-    Get content-based movie recommendations using the fitted recommender.
-    If no recommendations are found, return fallback popular movies.
-    """
+    """Return recommendations from the one app-owned content recommender."""
     recommender = _get_recommender()
-    if not recommender:
-        logger.error("ContentBasedRecommender is not available.")
+    if recommender is None:
         return get_popular_movies(top_n)
-
     try:
-        recommendations = recommender.get_recommendations(movie_id, top_n=top_n)
-        if not recommendations:
-            logger.info(f"No content-based recommendations for movie {movie_id}, returning fallback popular movies.")
-            return get_popular_movies(top_n)
-        return recommendations
-    except ValueError as ve:
-        logger.warning(f"Could not get recommendations for movie ID {movie_id}: {ve}")
+        recommendations = recommender.get_recommendations(int(movie_id), top_n=max(1, int(top_n)))
+        return recommendations or get_popular_movies(top_n)
+    except ValueError:
+        logger.info("Movie %s is outside the current embedding index; using popular fallback", movie_id)
         return get_popular_movies(top_n)
-    except Exception as e:
-        logger.error(f"Error getting content recommendations for movie ID {movie_id}: {str(e)}", exc_info=True)
+    except Exception:
+        logger.exception("Failed to get content recommendations for movie %s", movie_id)
         return get_popular_movies(top_n)
 
 
 def update_movie_metadata(movie_id: int, metadata: Dict[str, Any]) -> bool:
-    """
-    Update a movie's metadata in the database.
-    
-    Args:
-        movie_id: Movie ID
-        metadata: Dictionary with metadata to update
-        
-    Returns:
-        True if successful, False otherwise
-    """
+    """Update supported fields in the in-memory catalog (legacy helper)."""
     try:
-        # Get DataLoader
-        data_loader = _get_data_loader()
-        
-        # Get the movie
-        movie = data_loader.get_movie_by_id(movie_id)
-        if movie is None:
-            logger.warning(f"Movie with ID {movie_id} not found")
+        frame = get_data_loader().get_movies()
+        matches = frame.index[frame["movieId"] == int(movie_id)].tolist()
+        if not matches:
             return False
-        
-        # Update movie in the movies DataFrame
-        # Note: This only updates the in-memory DataFrame, not the CSV file
-        # In a real application, you would save to database or CSV
-        movies_df = data_loader.get_movies()
-        idx = movies_df.index[movies_df['movieId'] == movie_id].tolist()
-        
-        if not idx:
-            logger.warning(f"Movie with ID {movie_id} not found in DataFrame")
-            return False
-        
-        # Update only allowed fields
-        allowed_fields = ['title', 'genres', 'release_year', 'director', 
-                         'plot', 'poster_path', 'imdb_id', 'runtime']
-        
+        allowed = {"title", "genres", "year", "overview", "poster_url"}
         for field, value in metadata.items():
-            if field in allowed_fields and field in movies_df.columns:
-                movies_df.at[idx[0], field] = value
-        
-        logger.info(f"Movie {movie_id} metadata updated")
+            if field in allowed and field in frame.columns:
+                frame.at[matches[0], field] = value
         return True
-        
-    except Exception as e:
-        logger.error(f"Error updating movie {movie_id} metadata: {str(e)}")
-        return False 
+    except Exception:
+        logger.exception("Failed to update movie metadata for %s", movie_id)
+        return False
+
 
 def get_tmdb_id_for_movie(movie: Dict) -> Optional[int]:
-    """
-    Get TMDb ID for a movie, either from cache or by searching the TMDb API.
-    
-    Args:
-        movie: Movie dictionary with at least 'movieId' and 'title'
-        
-    Returns:
-        TMDb ID or None if not found
-    """
+    """Resolve and cache the TMDb ID for a local movie."""
     try:
-        movie_id = movie.get('movieId')
-        
-        # Check cache first
-        if movie_id in _TMDB_ID_CACHE:
-            return _TMDB_ID_CACHE[movie_id]
-        
-        # Extract year from title if available
-        title = movie.get('title', '')
-        year = _extract_year_from_title(title)
-        
-        # Clean title (remove year in parentheses)
-        clean_title = re.sub(r'\s*\(\d{4}\)$', '', title)
-        
-        # Search TMDb
+        movie_id = int(movie.get("movieId"))
+    except (TypeError, ValueError):
+        return None
+    if movie_id in _TMDB_ID_CACHE:
+        return _TMDB_ID_CACHE[movie_id]
+
+    title = str(movie.get("title", ""))
+    year = _extract_year_from_title(title)
+    clean_title = re.sub(r"\s*\(\d{4}\)$", "", title)
+    try:
         tmdb_id = find_tmdb_id_for_movie(clean_title, year)
-        
-        if tmdb_id:
-            # Cache the result
-            _TMDB_ID_CACHE[movie_id] = tmdb_id
-            return tmdb_id
-        
+    except Exception:
+        logger.exception("TMDb lookup failed for movie %s", movie_id)
         return None
-    except Exception as e:
-        # Only log movie ID to avoid Unicode issues
-        logger.error(f"Error getting TMDb ID for movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
-        return None
+    if tmdb_id:
+        _TMDB_ID_CACHE[movie_id] = int(tmdb_id)
+        return int(tmdb_id)
+    return None
+
 
 def enrich_movie_with_tmdb(movie: Dict) -> Dict:
-    """
-    Enrich movie data with information from TMDb.
-    
-    Args:
-        movie: Movie dictionary with at least 'movieId' and 'title'
-        
-    Returns:
-        Enriched movie dictionary
-    """
+    """Return a copy of a local movie enriched with available TMDb metadata."""
+    enriched = dict(movie)
+    enriched.setdefault("tmdb_id", None)
+    enriched.setdefault("tmdb_poster_url", None)
+    enriched.setdefault("tmdb_backdrop_url", None)
+
+    tmdb_id = get_tmdb_id_for_movie(movie)
+    if not tmdb_id:
+        return enriched
+    enriched["tmdb_id"] = tmdb_id
+
     try:
-        # Make a copy of the original movie to avoid modifying the input
-        enriched_movie = movie.copy()
-        
-        # Initialize TMDb fields with default values
-        enriched_movie['tmdb_id'] = None
-        enriched_movie['tmdb_poster_url'] = None
-        enriched_movie['tmdb_backdrop_url'] = None
-        
-        # Get TMDb ID
-        tmdb_id = get_tmdb_id_for_movie(movie)
-        
-        if not tmdb_id:
-            # No TMDb match found, return movie with default empty fields
-            # Use debug instead of warning to reduce console noise
-            logger.debug(f"No TMDb match found for movie {movie.get('movieId')}")
-            return enriched_movie
-        
-        # Store the TMDb ID in the movie dictionary
-        enriched_movie['tmdb_id'] = tmdb_id
-        
-        # Get movie details from TMDb
-        tmdb_details = get_movie_details(tmdb_id)
-        
-        if not tmdb_details:
-            # No details found, return movie with just the ID
-            return enriched_movie
-        
-        # Get watch providers
-        watch_providers = get_watch_providers(tmdb_id)
-        
-        # Add TMDb data to the enriched movie dictionary
-        tmdb_fields = {
-            'tmdb_poster_url': tmdb_details.get('poster_url'),
-            'tmdb_backdrop_url': tmdb_details.get('backdrop_url'),
-            'overview': tmdb_details.get('overview'),
-            'release_date': tmdb_details.get('release_date'),
-            'runtime': tmdb_details.get('runtime'),
-            'vote_average': tmdb_details.get('vote_average'),
-            'vote_count': tmdb_details.get('vote_count'),
-            'popularity': tmdb_details.get('popularity'),
-            'tmdb_genres': tmdb_details.get('genres', []),
-            'director': tmdb_details.get('director'),
-            'cast': tmdb_details.get('cast', []),
-            'trailers': tmdb_details.get('trailers', []),
-            'keywords': tmdb_details.get('keywords', []),
-            'production_companies': tmdb_details.get('production_companies', []),
-            'production_countries': tmdb_details.get('production_countries', []),
-            'watch_providers': watch_providers
+        details = get_movie_details(tmdb_id)
+        if not details:
+            return enriched
+        providers = get_watch_providers(tmdb_id)
+        fields = {
+            "tmdb_poster_url": details.get("poster_url"),
+            "tmdb_backdrop_url": details.get("backdrop_url"),
+            "overview": details.get("overview"),
+            "release_date": details.get("release_date"),
+            "runtime": details.get("runtime"),
+            "vote_average": details.get("vote_average"),
+            "vote_count": details.get("vote_count"),
+            "popularity": details.get("popularity"),
+            "tmdb_genres": details.get("genres", []),
+            "director": details.get("director"),
+            "cast": details.get("cast", []),
+            "trailers": details.get("trailers", []),
+            "keywords": details.get("keywords", []),
+            "production_companies": details.get("production_companies", []),
+            "production_countries": details.get("production_countries", []),
+            "watch_providers": providers,
         }
-        
-        # Update the enriched movie with TMDb data (only non-None values)
-        for key, value in tmdb_fields.items():
-            if value is not None:
-                enriched_movie[key] = value
-        
-        return enriched_movie
-    except Exception as e:
-        # Only log movie ID to avoid Unicode issues
-        logger.error(f"Error enriching movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
-        # Return the original movie data on error, don't return None
-        return movie
+        enriched.update({key: value for key, value in fields.items() if value is not None})
+        return enriched
+    except Exception:
+        logger.exception("TMDb enrichment failed for movie %s", movie.get("movieId"))
+        return enriched
+
 
 def get_tmdb_similar_movies(movie_id: int, limit: int = 10) -> List[Dict]:
-    """
-    Get similar movies from TMDb API.
-    
-    Args:
-        movie_id: The *TMDb* ID of the movie (Note: Not the local movieId).
-        limit: Number of similar movies to return.
-        
-    Returns:
-        List of similar movie dictionaries from TMDb.
-    """
     try:
-        # Directly call the renamed TMDb API function with the correct parameter name (max_results)
-        similar_movies_raw = get_tmdb_similar_movies_api(movie_id, max_results=limit)
-        
-        # Optional: Process/format the raw TMDb results if needed
-        # For now, return as is
-        return similar_movies_raw
-        
-    except Exception as e:
-        logger.error(f"Error getting TMDb similar movies for TMDb ID {movie_id}: {str(e)}")
+        return get_tmdb_similar_movies_api(int(movie_id), max_results=max(1, int(limit))) or []
+    except Exception:
+        logger.exception("TMDb similar lookup failed for TMDb ID %s", movie_id)
         return []
+
 
 def enrich_movies_list(movies: List[Dict], with_tmdb: bool = True) -> List[Dict]:
-    """
-    Enrich a list of movie dictionaries, optionally with TMDb data.
-    
-    Args:
-        movies: List of movie dictionaries
-        with_tmdb: Whether to include TMDb data
-        
-    Returns:
-        List of enriched movie dictionaries
-    """
-    # Handle empty list or None
+    """Enrich valid movie dictionaries while deduplicating remote work per call."""
     if not movies:
         return []
-        
     if not with_tmdb:
-        return movies
-    
-    # Local cache for this function call to avoid enriching the same movie twice
-    # (sometimes movies can appear multiple times in a list)
-    local_cache = {}
-    
-    enriched_movies = []
+        return [dict(movie) for movie in movies if isinstance(movie, dict)]
+
+    cache: Dict[int, Dict] = {}
+    result = []
     for movie in movies:
+        if not isinstance(movie, dict):
+            continue
+        movie_id = movie.get("movieId")
+        if movie_id is None:
+            result.append(dict(movie))
+            continue
         try:
-            # Skip None or invalid movies
-            if not movie or not isinstance(movie, dict):
-                logger.warning("Skipping invalid movie object in enrich_movies_list")
-                continue
+            key = int(movie_id)
+        except (TypeError, ValueError):
+            result.append(dict(movie))
+            continue
+        if key not in cache:
+            cache[key] = enrich_movie_with_tmdb(movie)
+            if not cache[key].get("tmdb_poster_url"):
+                cache[key]["tmdb_poster_url"] = "/static/img/movie-placeholder.jpg"
+        result.append(dict(cache[key]))
+    return result
 
-            # Use movieId as cache key
-            movie_id = movie.get('movieId')
-            if not movie_id:
-                enriched_movies.append(movie)
-                continue
 
-            if movie_id in local_cache:
-                enriched_movies.append(local_cache[movie_id])
-                continue
-
-            # Enrich movie
-            enriched_movie = enrich_movie_with_tmdb(movie)
-
-            # Ensure a valid poster URL is always set
-            if not enriched_movie.get('tmdb_poster_url') or not enriched_movie['tmdb_poster_url'].startswith('http'):
-                # Use local static placeholder if available
-                enriched_movie['tmdb_poster_url'] = '/static/img/movie-placeholder.jpg'
-
-            # Cache the result
-            local_cache[movie_id] = enriched_movie
-            enriched_movies.append(enriched_movie)
-        except Exception as e:
-            logger.error(f"Error enriching movie ID {movie.get('movieId', 'unknown')}: {str(e)}")
-            if movie:
-                enriched_movies.append(movie)
-    return enriched_movies
-
-# Make unique genre list cachable
-@memoize_or_pass_through(timeout=86400) # Cache genres for 1 day
+@memoize_or_pass_through(timeout=86400)
 def get_unique_genres() -> List[str]:
-    """
-    Get a list of all unique genres in the dataset.
-    
-    Returns:
-        List of unique genre strings
-    """
     try:
-        data_loader = _get_data_loader()
-        return data_loader.get_unique_genres()
-    except Exception as e:
-        logger.error(f"Error getting unique genres: {str(e)}")
-        return [] 
+        return get_data_loader().get_unique_genres()
+    except Exception:
+        logger.exception("Failed to get genres")
+        return []
+
 
 def find_local_id_from_tmdb_id(tmdb_id: int) -> Optional[int]:
-    """
-    Find the local movie ID based on a TMDb ID.
-    
-    Args:
-        tmdb_id: The TMDb ID to look up
-        
-    Returns:
-        The local movieId if found, None otherwise
-    """
+    """Resolve a local ID from already-known TMDb mappings without mass API scans."""
     try:
-        data_loader = _get_data_loader()
-        movies_df = data_loader.get_movies()
-        
-        # Check if 'tmdb_id' column exists - if using our enriched dataframe
-        if 'tmdb_id' in movies_df.columns:
-            movie = movies_df[movies_df['tmdb_id'] == tmdb_id]
-            if not movie.empty:
-                return int(movie.iloc[0]['movieId'])
-        
-        # Otherwise try to find the movie by searching through enriched movies
-        # This is more expensive as it has to enrich all movies
-        # We'll limit to a sample of movies to make it more efficient
-        sample_size = min(1000, len(movies_df))
-        sample_df = movies_df.sample(sample_size)
-        
-        for _, row in sample_df.iterrows():
-            movie_dict = row.to_dict()
-            enriched = enrich_movie_with_tmdb(movie_dict)
-            if enriched.get('tmdb_id') == tmdb_id:
-                return int(enriched['movieId'])
-        
+        tmdb_id = int(tmdb_id)
+    except (TypeError, ValueError):
         return None
-    except Exception as e:
-        logger.error(f"Error finding local ID for TMDb ID {tmdb_id}: {str(e)}")
-        return None
+
+    for local_id, cached_tmdb_id in _TMDB_ID_CACHE.items():
+        if cached_tmdb_id == tmdb_id:
+            return local_id
+
+    frame = get_data_loader().get_movies()
+    if "tmdb_id" in frame.columns:
+        matches = frame[frame["tmdb_id"] == tmdb_id]
+        if not matches.empty:
+            return int(matches.iloc[0]["movieId"])
+    return None
