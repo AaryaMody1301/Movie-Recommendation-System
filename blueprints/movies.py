@@ -1,165 +1,262 @@
-"""
-Movies blueprint for browsing and searching movies.
-"""
-from flask import Blueprint, render_template, request, jsonify, abort, flash
-from services.movie_service import (
-    get_all_movies, 
-    get_movie_by_id, 
-    search_movies, 
-    get_movies_by_genre,
-    get_popular_movies,
-    get_high_rated_movies
-)
-from services.recommendation_service import get_unique_genres
+"""Movie browsing, search, and detail routes."""
 
-movies = Blueprint('movies', __name__)
+import logging
+
+from flask import Blueprint, flash, jsonify, render_template, request
+
+import services.movie_service as movie_service
+from services.tmdb_service import get_movie_details as get_tmdb_movie_details
+
+logger = logging.getLogger(__name__)
+movies = Blueprint("movies", __name__)
 
 
-@movies.route('/browse')
-def browse():
-    """Browse all movies page."""
-    # Pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 24, type=int)
-    
-    # Filtering and sorting parameters
-    genre = request.args.get('genre', '')
-    sort_by = request.args.get('sort_by', 'title')
-    sort_order = request.args.get('sort_order', 'asc')
-    
-    # Get movies with pagination
-    if genre:
-        movies_data, total = get_movies_by_genre(
-            genre, page=page, per_page=per_page, 
-            sort_by=sort_by, sort_order=sort_order
-        )
-        if total == 0:
-            flash(f'No movies found in the "{genre}" genre.', 'info')
-    else:
-        movies_data, total = get_all_movies(
-            page=page, per_page=per_page, 
-            sort_by=sort_by, sort_order=sort_order
-        )
-        if total == 0:
-            flash('No movies found.', 'info')
-    
-    # Calculate total pages
-    total_pages = (total + per_page - 1) // per_page
-    
-    # Get unique genres for filtering
-    genres = get_unique_genres()
-    
-    return render_template(
-        'movies/browse.html',
-        movies=movies_data,
-        page=page,
-        per_page=per_page,
-        total_pages=total_pages,
-        total_movies=total,
-        current_genre=genre,
-        genres=genres,
-        sort_by=sort_by,
-        sort_order=sort_order
-    )
+def _genres():
+    return movie_service.get_unique_genres()
 
 
-@movies.route('/movie/<int:movie_id>')
-def movie_detail(movie_id):
-    """Movie detail page."""
-    movie = get_movie_by_id(movie_id)
-    
+def _pagination(page, per_page, total, **extra):
+    data = {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": (total + per_page - 1) // per_page if per_page else 0,
+    }
+    data.update(extra)
+    return data
+
+
+def _tmdb_for_template(movie):
+    """Normalize a TMDb-only record to fields understood by current templates."""
     if not movie:
-        flash('Movie not found.', 'warning')
-        return render_template('movies/detail.html', movie=None), 404
-    
-    # Split genres for display
-    movie['genres_list'] = movie['genres'].split('|') if movie['genres'] else []
-    
+        return None
+    normalized = dict(movie)
+    normalized["tmdb_id"] = normalized.get("tmdb_id") or normalized.get("id")
+    normalized["tmdb_poster_url"] = normalized.get("tmdb_poster_url") or normalized.get("poster_url")
+    normalized["tmdb_backdrop_url"] = normalized.get("tmdb_backdrop_url") or normalized.get("backdrop_url")
+
+    genres = normalized.get("genres")
+    if isinstance(genres, list):
+        normalized["genres"] = "|".join(
+            genre.get("name", "") if isinstance(genre, dict) else str(genre)
+            for genre in genres
+            if genre
+        )
+    return normalized
+
+
+def _content_recommendations(movie_id, top_n=6):
+    """Return recommendations in the nested shape expected by movie_detail.html."""
+    raw = movie_service.get_content_recommendations(movie_id, top_n=top_n) or []
+    normalized = []
+
+    nested = [rec for rec in raw if isinstance(rec, dict) and isinstance(rec.get("movie"), dict)]
+    if nested:
+        movies_to_enrich = [rec["movie"] for rec in nested]
+        enriched = movie_service.enrich_movies_list(movies_to_enrich) if movies_to_enrich else []
+        enriched_by_id = {movie.get("movieId"): movie for movie in enriched}
+        for rec in nested:
+            rec = dict(rec)
+            movie = dict(rec["movie"])
+            rec["movie"] = enriched_by_id.get(movie.get("movieId"), movie)
+            normalized.append(rec)
+        return normalized
+
+    # Fallbacks from movie_service are plain movie dictionaries. Preserve them
+    # instead of silently discarding them.
+    flat = [rec for rec in raw if isinstance(rec, dict) and rec.get("movieId") is not None]
+    enriched = movie_service.enrich_movies_list(flat) if flat else []
+    enriched_by_id = {movie.get("movieId"): movie for movie in enriched}
+    for movie in flat:
+        normalized.append({"movie": enriched_by_id.get(movie.get("movieId"), movie)})
+    return normalized
+
+
+@movies.route("/browse")
+def browse():
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", 24, type=int), 1), 100)
+    genre = request.args.get("genre", "").strip()
+    sort_by = request.args.get("sort_by", "title")
+    sort_order = request.args.get("sort_order", "asc")
+
+    if genre:
+        movie_rows, total = movie_service.get_movies_by_genre(
+            genre,
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    else:
+        movie_rows, total = movie_service.get_all_movies(
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+
+    display_movies = movie_service.enrich_movies_list(movie_rows) if movie_rows else []
     return render_template(
-        'movies/detail.html', 
-        movie=movie
+        "browse.html",
+        movies=display_movies,
+        genres=_genres(),
+        current_genre=genre,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=_pagination(page, per_page, total, sort_by=sort_by, sort_order=sort_order),
     )
 
 
-@movies.route('/genre/<genre>')
-def genre(genre):
-    """Movies by genre page."""
-    # Pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 24, type=int)
-    
-    # Get movies by genre with pagination
-    movies_data, total = get_movies_by_genre(genre, page=page, per_page=per_page)
-    if total == 0:
-        flash(f'No movies found in the "{genre}" genre.', 'info')
-    
-    # Calculate total pages
-    total_pages = (total + per_page - 1) // per_page
-    
-    return render_template(
-        'movies/genre.html',
-        genre=genre,
-        movies=movies_data,
-        page=page,
-        per_page=per_page,
-        total_pages=total_pages,
-        total_movies=total
-    )
-
-
-@movies.route('/search')
+@movies.route("/search")
 def search():
-    """Search movies page."""
-    query = request.args.get('query', '')
-    
+    query = request.args.get("query", "").strip()
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = 20
+    genres = _genres()
+
     if not query:
-        flash('Please enter a search term.', 'info')
-        return render_template('movies/search.html', query='', movies=[], total=0)
-    
-    # Pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 24, type=int)
-    
-    # Search movies with pagination
-    movies_data, total = search_movies(query, page=page, per_page=per_page)
-    if total == 0:
-        flash(f'No movies found matching "{query}". Try another search term.', 'info')
-    
-    # Calculate total pages
-    total_pages = (total + per_page - 1) // per_page
-    
+        return render_template(
+            "search.html",
+            movies=[],
+            query="",
+            genres=genres,
+            pagination=None,
+        )
+
+    try:
+        results, total = movie_service.search_movies(query, page=page, per_page=per_page)
+        display_movies = movie_service.enrich_movies_list(results) if results else []
+        if not display_movies:
+            flash(f'No movies found matching "{query}".', "info")
+        pagination = _pagination(page, per_page, total)
+    except Exception:
+        logger.exception("Movie search failed for %r", query)
+        flash("Movie search failed. Please try again.", "danger")
+        display_movies = []
+        pagination = None
+
     return render_template(
-        'movies/search.html',
+        "search.html",
+        movies=display_movies,
         query=query,
-        movies=movies_data,
-        page=page,
-        per_page=per_page,
-        total_pages=total_pages,
-        total_movies=total
+        genres=genres,
+        pagination=pagination,
     )
 
 
-@movies.route('/api/search')
+@movies.route("/genre/<genre>")
+def genre(genre):
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = 24
+    sort_by = request.args.get("sort_by", "title")
+    sort_order = request.args.get("sort_order", "asc")
+    genres = _genres()
+
+    movie_rows, total = movie_service.get_movies_by_genre(
+        genre,
+        page=page,
+        per_page=per_page,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    display_movies = movie_service.enrich_movies_list(movie_rows) if movie_rows else []
+
+    return render_template(
+        "genre.html",
+        genre=genre,
+        movies=display_movies,
+        genres=genres,
+        pagination=_pagination(
+            page,
+            per_page,
+            total,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        ),
+    )
+
+
+@movies.route("/movie/<int:movie_id>")
+def movie_detail(movie_id):
+    genres = _genres()
+    movie = movie_service.get_movie_by_id(movie_id, with_tmdb=True)
+    if not movie:
+        return render_template("404.html", genres=genres), 404
+
+    try:
+        content_recommendations = _content_recommendations(movie_id)
+    except Exception:
+        logger.exception("Content recommendations failed for movie %s", movie_id)
+        content_recommendations = []
+
+    tmdb_similar = []
+    tmdb_id = movie.get("tmdb_id")
+    if tmdb_id:
+        try:
+            tmdb_similar = [
+                _tmdb_for_template(item)
+                for item in movie_service.get_tmdb_similar_movies(tmdb_id, limit=6)
+            ]
+            tmdb_similar = [item for item in tmdb_similar if item]
+        except Exception:
+            logger.exception("TMDb similar lookup failed for movie %s", movie_id)
+
+    return render_template(
+        "movie_detail.html",
+        movie=movie,
+        similar_movies=content_recommendations,
+        tmdb_similar_movies=tmdb_similar,
+        genres=genres,
+    )
+
+
+@movies.route("/movie/tmdb/<int:tmdb_id>")
+def movie_detail_by_tmdb(tmdb_id):
+    genres = _genres()
+    local_movie_id = movie_service.find_local_id_from_tmdb_id(tmdb_id)
+    if local_movie_id:
+        return movie_detail(local_movie_id)
+
+    movie = _tmdb_for_template(get_tmdb_movie_details(tmdb_id))
+    if not movie:
+        return render_template("404.html", genres=genres), 404
+
+    try:
+        tmdb_similar = [
+            _tmdb_for_template(item)
+            for item in movie_service.get_tmdb_similar_movies(tmdb_id, limit=6)
+        ]
+        tmdb_similar = [item for item in tmdb_similar if item]
+    except Exception:
+        logger.exception("TMDb similar lookup failed for TMDb ID %s", tmdb_id)
+        tmdb_similar = []
+
+    return render_template(
+        "movie_detail.html",
+        movie=movie,
+        similar_movies=[],
+        tmdb_similar_movies=tmdb_similar,
+        genres=genres,
+    )
+
+
+@movies.route("/api/search")
 def api_search():
-    """API endpoint for searching movies (for autocomplete)."""
-    query = request.args.get('query', '')
-    limit = request.args.get('limit', 10, type=int)
-    
+    query = request.args.get("query", "").strip()
+    limit = min(max(request.args.get("limit", 10, type=int), 1), 50)
     if not query:
         return jsonify([])
-    
-    # Search movies with limit
-    movies_data, _ = search_movies(query, page=1, per_page=limit)
-    
-    # Return simplified movie data for autocomplete
-    result = [
-        {
-            'id': movie['movieId'],
-            'title': movie['title'],
-            'year': movie.get('year', ''),
-            'genres': movie['genres']
-        }
-        for movie in movies_data
-    ]
-    
-    return jsonify(result)
+
+    rows, _ = movie_service.search_movies(query, page=1, per_page=limit)
+    return jsonify(
+        [
+            {
+                "id": movie.get("movieId"),
+                "title": movie.get("title"),
+                "year": movie.get("year", ""),
+                "genres": movie.get("genres", ""),
+            }
+            for movie in rows
+        ]
+    )
