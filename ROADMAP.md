@@ -1,6 +1,6 @@
 # Movie Recommendation System Repair Roadmap
 
-This roadmap converts the repository audit into independently testable repair phases.
+This roadmap records the eight independently testable phases used to repair and consolidate the repository. Completed phases are historical milestones; the current implementation is summarized in `SUMMARY.md`.
 
 ## Phase 1 — Security, dependencies, and startup foundation
 
@@ -98,7 +98,7 @@ Goal: make regressions difficult to reintroduce.
 - Add structured logging and health/readiness endpoints.
 - Document production environment variables and deployment commands.
 
-**Status: in progress on `fix/phase-7-ci-observability`.**
+**Status: complete and merged via PR #7.**
 
 ## Phase 8 — Repository cleanup and documentation
 
@@ -107,6 +107,12 @@ Goal: leave a coherent project rather than a collection of historical implementa
 - Remove obsolete/dead modules after migrated functionality is verified.
 - Remove duplicate movie dataset copies or clearly define the canonical data source.
 - Update README/project structure to match reality.
-- Update SUMMARY.md to distinguish implemented features from future work.
+- Update `SUMMARY.md` to distinguish implemented features from future work.
 - Add contribution/development instructions and troubleshooting guidance.
 - Complete final repository hygiene and historical cleanup documentation.
+
+**Status: in progress on `fix/phase-8-repository-cleanup`.**
+
+### Phase 8 cleanup contract
+
+The final cleanup establishes `data/movies.csv` as the only committed movie catalog, removes the superseded standalone TF-IDF recommender and synthetic-ratings helper, removes unused serialization/template/placeholder artifacts and legacy dependencies, consolidates `.gitignore`, and adds current README, summary, contribution, troubleshooting, security, and pull-request documentation.
