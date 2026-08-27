@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Why {{ movie.title }}?{% endblock %}
+{% block content %}
+<h1 class="h2 mb-3">Why {{ movie.title }}?</h1>
+{% if source_movie %}<p class="text-muted">Compared with {{ source_movie.title }}.</p>{% endif %}
+{% if explanation.error %}
+<div class="alert alert-warning">{{ explanation.error }}</div>
+{% else %}
+<ul class="list-group mb-4">{% for reason in explanation.reasons %}<li class="list-group-item">{{ reason }}</li>{% endfor %}</ul>
+{% if explanation.genre_match %}<h2 class="h5">Your matching genres</h2><div class="mb-4">{% for item in explanation.genre_match %}<span class="badge text-bg-secondary me-1">{{ item.genre }}</span>{% endfor %}</div>{% endif %}
+{% endif %}
+<a class="btn btn-primary" href="{{ url_for('movies.movie_detail', movie_id=movie.movieId) }}">View movie</a>
+{% endblock %}
