@@ -1,0 +1,47 @@
+name: Deployment smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gunicorn-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - name: Validate Gunicorn configuration
+        env:
+          FLASK_ENV: production
+          SECRET_KEY: ci-only-secret-key
+          DATABASE_URI: sqlite:///ci-health.db
+          MOVIES_CSV: data/movies.csv
+          RATINGS_CSV: ""
+          RECOMMENDER_ENABLED: "false"
+          TMDB_API_KEY: ""
+          LOG_FORMAT: json
+          APP_VERSION: ci
+        run: gunicorn --check-config wsgi:app
+      - name: Boot and probe production WSGI app
+        env:
+          FLASK_ENV: production
+          SECRET_KEY: ci-only-secret-key
+          DATABASE_URI: sqlite:///ci-health.db
+          MOVIES_CSV: data/movies.csv
+          RATINGS_CSV: ""
+          RECOMMENDER_ENABLED: "false"
+          TMDB_API_KEY: ""
+          LOG_FORMAT: json
+          APP_VERSION: ci
+        run: python scripts/ci_gunicorn_smoke.py
