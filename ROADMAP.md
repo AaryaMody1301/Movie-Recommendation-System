@@ -71,7 +71,7 @@ Goal: rebuild personalization on top of correct persistent user interactions.
 - Avoid dense full-catalog O(N^2) similarity matrices where possible.
 - Add recommendation explanations based on real contributing signals.
 
-**Status: in progress on `fix/phase-5-hybrid-personalization`.**
+**Status: complete and merged.**
 
 ## Phase 6 — TMDb enrichment and performance
 
@@ -83,6 +83,8 @@ Goal: make external enrichment reliable without making page loads fragile.
 - Move expensive enrichment away from large synchronous page-load batches.
 - Make watch-provider region configurable.
 - Establish cache invalidation and expiry rules.
+
+**Status: in progress on `fix/phase-6-tmdb-performance`.**
 
 ## Phase 7 — Tests, CI, deployment, and observability
 
