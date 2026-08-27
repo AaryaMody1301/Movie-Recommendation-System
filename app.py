@@ -2,9 +2,10 @@
 
 import logging
 import os
+import time
 
 import dotenv
-from flask import Flask, g, render_template
+from flask import Flask, g, render_template, request
 from flask_caching import Cache
 from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
@@ -14,15 +15,12 @@ from config import get_config
 from data.data_loader import DataLoader
 from database.db import init_app as init_database
 from models.content_based import ContentBasedRecommender
+from observability import configure_logging
 from services.auth_service import get_user_by_id
 import services.movie_service as movie_service
 
 dotenv.load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 cache = Cache()
@@ -66,6 +64,11 @@ def _initialize_recommender(app, embedding_args):
         app.recommender = None
         return
 
+    if not app.config.get("RECOMMENDER_ENABLED", True):
+        app.recommender = None
+        logger.info("Content recommender initialization is disabled by configuration")
+        return
+
     try:
         app.recommender = ContentBasedRecommender(
             transformer_model=app.config.get(
@@ -96,6 +99,11 @@ def create_app(test_config=None, embedding_args=None):
     if test_config:
         app.config.from_mapping(test_config)
 
+    configure_logging(
+        app.config.get("LOG_LEVEL", "INFO"),
+        app.config.get("LOG_FORMAT", "text"),
+    )
+
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
@@ -118,6 +126,24 @@ def create_app(test_config=None, embedding_args=None):
     def expose_request_services():
         g.data_loader = getattr(app, "data_loader", None)
         g.recommender = getattr(app, "recommender", None)
+        g.request_started_at = time.perf_counter()
+
+    @app.after_request
+    def log_request(response):
+        started_at = getattr(g, "request_started_at", None)
+        duration_ms = (
+            (time.perf_counter() - started_at) * 1000.0
+            if started_at is not None
+            else 0.0
+        )
+        logger.info(
+            "request_complete method=%s path=%s status=%s duration_ms=%.2f",
+            request.method,
+            request.path,
+            response.status_code,
+            duration_ms,
+        )
+        return response
 
     register_blueprints(app)
 

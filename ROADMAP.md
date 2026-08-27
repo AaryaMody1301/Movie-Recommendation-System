@@ -84,7 +84,7 @@ Goal: make external enrichment reliable without making page loads fragile.
 - Make watch-provider region configurable.
 - Establish cache invalidation and expiry rules.
 
-**Status: in progress on `fix/phase-6-tmdb-performance`.**
+**Status: complete and merged.**
 
 ## Phase 7 — Tests, CI, deployment, and observability
 
@@ -97,6 +97,8 @@ Goal: make regressions difficult to reintroduce.
 - Verify Gunicorn production startup.
 - Add structured logging and health/readiness endpoints.
 - Document production environment variables and deployment commands.
+
+**Status: in progress on `fix/phase-7-ci-observability`.**
 
 ## Phase 8 — Repository cleanup and documentation
 

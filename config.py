@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_bool(name, default=False):
+    """Parse common environment boolean values deterministically."""
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Config:
     """Base application configuration."""
 
@@ -31,6 +39,7 @@ class Config:
         'instance/embeddings_cache.pkl',
     )
     EMBEDDING_BATCH_SIZE = int(os.environ.get('EMBEDDING_BATCH_SIZE', '32'))
+    RECOMMENDER_ENABLED = _env_bool('RECOMMENDER_ENABLED', True)
     # Retained for offline model-training/export tooling. Online collaborative
     # personalization is trained lazily from persisted SQLAlchemy ratings.
     COLLAB_MODEL_PATH = os.environ.get(
@@ -72,6 +81,8 @@ class Config:
     TMDB_NEGATIVE_MAPPING_TTL = int(os.environ.get('TMDB_NEGATIVE_MAPPING_TTL', '86400'))
 
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    LOG_FORMAT = os.environ.get('LOG_FORMAT', 'text').strip().lower()
+    APP_VERSION = os.environ.get('APP_VERSION', 'dev')
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
@@ -85,12 +96,14 @@ class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
     WTF_CSRF_ENABLED = False
+    RECOMMENDER_ENABLED = False
 
 
 class ProductionConfig(Config):
     DEBUG = False
     TESTING = False
     SESSION_COOKIE_SECURE = True
+    LOG_FORMAT = os.environ.get('LOG_FORMAT', 'json').strip().lower()
 
 
 config = {

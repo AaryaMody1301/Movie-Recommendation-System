@@ -80,12 +80,20 @@ def test_literal_search_exact_genres_and_full_pagination(tmp_path):
             assert len(page_two) == 10
             assert page_two[0]["movieId"] == 11
 
-            genre_page, genre_total = movie_service.get_movies_by_genre(
-                "Action", page=3, per_page=10
-            )
+            genre_pages = []
+            genre_total = None
+            for page_number in (1, 2, 3):
+                genre_page, current_total = movie_service.get_movies_by_genre(
+                    "Action", page=page_number, per_page=10
+                )
+                genre_pages.append(genre_page)
+                genre_total = current_total
+
             assert genre_total == 25
-            assert len(genre_page) == 5
-            assert genre_page[0]["movieId"] == 21
+            assert [len(page) for page in genre_pages] == [10, 10, 5]
+            paged_ids = [movie["movieId"] for page in genre_pages for movie in page]
+            assert len(paged_ids) == len(set(paged_ids)) == 25
+            assert set(paged_ids) == set(range(1, 26))
 
             # Sorting by baseline rating must not drop unrated catalog movies.
             _, browse_total = movie_service.get_all_movies(
