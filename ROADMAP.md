@@ -58,7 +58,7 @@ Goal: fix visible product behavior before optimizing model quality.
 - Validate embedding caches against dataset/model/config fingerprints.
 - Wire documented model settings into the active application.
 
-**Status: in progress on `fix/phase-4-correctness`.**
+**Status: complete and merged.**
 
 ## Phase 5 — Personalized, collaborative, and hybrid recommendations
 
@@ -70,6 +70,8 @@ Goal: rebuild personalization on top of correct persistent user interactions.
 - Implement hybrid scoring with normalized, configurable weights.
 - Avoid dense full-catalog O(N^2) similarity matrices where possible.
 - Add recommendation explanations based on real contributing signals.
+
+**Status: in progress on `fix/phase-5-hybrid-personalization`.**
 
 ## Phase 6 — TMDb enrichment and performance
 
@@ -103,4 +105,4 @@ Goal: leave a coherent project rather than a collection of historical implementa
 - Update README/project structure to match reality.
 - Update SUMMARY.md to distinguish implemented features from future work.
 - Add contribution/development instructions and troubleshooting guidance.
-- Review Git history/secrets remediation documentation after credential rotation.
+- Complete final repository hygiene and historical cleanup documentation.
