@@ -44,7 +44,7 @@ Goal: make every service operate against one documented DataLoader API.
 - Persist user ratings/watchlists instead of using placeholders or in-memory mutations.
 - Add validation for pagination, sorting, and API request payloads.
 
-**Status: in progress on `fix/phase-3-service-contracts`.**
+**Status: complete and merged.**
 
 ## Phase 4 — Search, browse, and recommendation correctness
 
@@ -57,6 +57,8 @@ Goal: fix visible product behavior before optimizing model quality.
 - Ensure all movie IDs can receive recommendations, not only a random startup sample.
 - Validate embedding caches against dataset/model/config fingerprints.
 - Wire documented model settings into the active application.
+
+**Status: in progress on `fix/phase-4-correctness`.**
 
 ## Phase 5 — Personalized, collaborative, and hybrid recommendations
 
