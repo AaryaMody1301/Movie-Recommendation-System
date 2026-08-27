@@ -118,28 +118,14 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
 
 
 def generate_reset_token(email: str) -> Optional[str]:
-    """Issue a one-time password-reset token and persist only its hash."""
-    user = get_user_by_email(email)
-    if user is None:
-        return None
-
-    token = user.issue_reset_token()
-    db.session.commit()
-    return token
+    """Password-reset persistence is deferred until a migration system exists."""
+    logger.warning("Password reset tokens are not enabled yet")
+    return None
 
 
 def is_token_valid(token: str) -> bool:
-    """Return whether a password-reset token is currently valid."""
-    if not token:
-        return False
-
-    # Token hashes are deterministic SHA-256 values, so locate the owning user by hash.
-    import hashlib
-
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    statement = db.select(User).where(User.reset_token_hash == token_hash)
-    user = db.session.execute(statement).scalar_one_or_none()
-    return bool(user and user.verify_reset_token(token))
+    """Password-reset persistence is deferred until a migration system exists."""
+    return False
 
 
 def update_last_login(user_id: int) -> bool:
