@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Your Ratings - Movie Recommendation System{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div><h1 class="h2 mb-1">Your ratings</h1><p class="text-muted mb-0">{{ total_ratings }} saved rating{% if total_ratings != 1 %}s{% endif %}</p></div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('user.profile') }}">Back to profile</a>
+</div>
+
+<div class="table-responsive">
+<table class="table align-middle">
+  <thead><tr><th>Movie</th><th>Rating</th><th>Date</th></tr></thead>
+  <tbody>
+  {% for item in ratings %}
+  <tr><td><a href="{{ url_for('movies.movie_detail', movie_id=item.movieId) }}">{{ item.movie.title }}</a></td><td>{{ "%.1f"|format(item.rating) }}/5</td><td>{{ item.date or "—" }}</td></tr>
+  {% else %}<tr><td colspan="3" class="text-muted">No ratings saved yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if total_pages > 1 %}
+<nav aria-label="Ratings pages"><ul class="pagination">
+  {% for number in range(1, total_pages + 1) %}
+  <li class="page-item {% if number == page %}active{% endif %}"><a class="page-link" href="{{ url_for('user.ratings', page=number, per_page=per_page, sort_by=sort_by, sort_order=sort_order) }}">{{ number }}</a></li>
+  {% endfor %}
+</ul></nav>
+{% endif %}
+{% endblock %}
