@@ -1,26 +1,12 @@
 """Development server script for Movie Recommendation System."""
 
 import argparse
-import logging
 import sys
 
 from app import create_app
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.WARNING)
-    for logger_name in [
-        "",
-        "models.content_based",
-        "data.data_loader",
-        "services.movie_service",
-        "services.recommendation_service",
-        "services.tmdb_service",
-        "app",
-        "__main__",
-    ]:
-        logging.getLogger(logger_name).setLevel(logging.WARNING)
-
     pre_parser = argparse.ArgumentParser(add_help=False)
     pre_parser.add_argument(
         "--rebuild-embeddings",
