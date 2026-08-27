@@ -1,154 +1,164 @@
-# Movie Recommendation System - Project Summary
+# Movie Recommendation System — Current Project Summary
 
-This project implements a movie recommendation system using Flask, Pandas, and Scikit-learn, focusing on content-based filtering using movie genres.
+## Status
 
-## Key Components
+The repository has been repaired from a collection of partially overlapping implementations into one coherent Flask application. The active architecture uses a single application factory, blueprint routes, SQLAlchemy persistence, one canonical catalog loader, modern content embeddings, persisted-user collaborative signals, bounded hybrid fusion, optional TMDb enrichment, and GitHub Actions validation.
 
-### 1. Recommendation Engine (`recommendation.py`)
-- Uses TF-IDF vectorization to convert movie genres into numerical vectors
-- Calculates similarity between movies using cosine similarity
-- Implements memory-efficient batch processing for larger datasets
-- Provides movie search and filtering by genres
+This document describes what is implemented **now**. Historical goals and completed repair phases are tracked in `ROADMAP.md`.
 
-### 2. Web Application (`app.py`)
-- Implements a Flask server with routes for:
-  - Home page with featured movies
-  - Movie detail pages with recommendations
-  - Search functionality
-  - Genre-based browsing
+## Implemented Application
 
-### 3. User Interface (HTML/CSS/JS)
-- Responsive Bootstrap-based design
-- Dynamic search functionality with AJAX
-- Movie cards with placeholders for images
-- Genre filtering and navigation
+### Flask application and routes
 
-## Technical Implementation Details
+- `app.create_app` is the canonical application factory.
+- `wsgi:app` is the production WSGI target.
+- `run.py` is the development entry point and supports embedding rebuild/batch options.
+- Routes are organized under `blueprints/` for top-level pages, authentication, movie browsing/search/details, recommendations, user interactions, and health checks.
+- WTForms/CSRF protection and Flask-Login are integrated into the active application.
 
-### Content-Based Filtering
-The system analyzes movie genres using TF-IDF (Term Frequency-Inverse Document Frequency) to create vector representations of each movie. When a user views a movie, the system calculates the cosine similarity between that movie's vector and all other movies to find the most similar ones.
+### Persistent user data
 
-### Memory Optimization
-The implementation uses techniques like:
-- Linear kernel instead of full cosine similarity matrix
-- On-demand similarity calculation
-- Optional sampling for development/testing
-- Garbage collection to free memory
+SQLAlchemy-backed models persist registered users and application interactions. Ratings and watchlist entries are not in-memory placeholders and are subject to database uniqueness/relationship constraints.
 
-### Data Handling
-- Loads movie data from CSV files
-- Error handling for missing or malformed data
-- Flexible schema to accommodate different CSV structures
+The default local database is SQLite under Flask's `instance/` directory, with `DATABASE_URI` available for an alternate SQLAlchemy database.
 
-## Possible Enhancements
+### Canonical catalog and baseline ratings
 
-1. **Collaborative Filtering**: Add user ratings and implement user-based recommendations
-2. **Improved Content Analysis**: Incorporate additional movie metadata like plot summaries, directors, actors
-3. **Database Integration**: Replace CSV files with a proper database for better performance
-4. **User Accounts**: Add authentication and user profiles for personalized recommendations
-5. **Visual Improvements**: Add real movie posters from an API like TMDB
+`data/movies.csv` is the single repository copy of the local movie catalog and is loaded through the application-owned `DataLoader`.
 
-## How to Run the System
+`data/ratings.csv` is baseline/offline data for data/model tooling. It is deliberately **not** treated as registered-user behavior by the online personalization service. Collaborative personalization is trained from ratings persisted by actual application users.
 
-```
-pip install -r requirements.txt
-python app.py
-```
+### Search and browsing
 
-Then open http://127.0.0.1:5000/ in your web browser. 
+The active catalog layer supports:
 
-# TMDb API Integration Summary
+- literal-safe title search;
+- token-aware genre matching;
+- pagination across complete result sets rather than pre-truncated samples;
+- configurable sorting;
+- catalog fallbacks when external enrichment is unavailable.
 
-## Overview
-This document summarizes the enhancement of our Movie Recommendation System with The Movie Database (TMDb) API integration. The integration greatly enriches the movie data, improves recommendation quality, and provides a more engaging and informative user interface.
+### Content-based recommendations
 
-## Implemented Features
+`models/content_based.py` is the active content recommender. It uses Sentence Transformers embeddings over the complete indexed catalog rather than the removed historical standalone TF-IDF implementation.
 
-### 1. TMDb Service Module (`services/tmdb_service.py`)
-- Created a dedicated module for TMDb API interactions
-- Implemented comprehensive functions for movie data retrieval:
-  - `search_movie_by_title()`: Finds potential matching movies in TMDb
-  - `get_movie_details()`: Fetches comprehensive details for a specific movie
-  - `get_watch_providers()`: Retrieves streaming/rental/purchase options (region-specific)
-  - `get_similar_movies()`: Obtains TMDb-recommended similar movies
-  - `find_tmdb_id_for_movie()`: Matches local movie entries with TMDb IDs
-- Implemented robust caching using Python's dictionary and LRU cache to minimize API requests
-- Added error handling for network issues, rate limits, and other potential API problems
+The content cache is validated using version/model/catalog fingerprints. Compatible caches can be loaded without constructing the transformer; incompatible caches rebuild instead of silently returning stale recommendations. Similarity is calculated on demand for the requested movie rather than storing a dense all-pairs similarity matrix.
 
-### 2. Movie Service Integration (`services/movie_service.py`)
-- Enhanced the existing movie service to incorporate TMDb data
-- Added functions to associate local movie data with TMDb IDs
-- Implemented `enrich_movie_with_tmdb()` to combine local and TMDb data
-- Added support for TMDb similar movies recommendations
+### Collaborative recommendations
 
-### 3. Enhanced Recommendation Engine (`recommendation.py`)
-- Improved content-based filtering by incorporating TMDb keywords, cast, and crew data
-- Implemented caching for TMDb keyword data
-- Created a more sophisticated TF-IDF matrix that includes enhanced movie metadata
-- Added support for toggling between traditional content-based and TMDb recommendations
+`models/collaborative_filtering.py` implements matrix-factorization recommendations with corrected raw user/movie ID handling and serialization support.
 
-### 4. Flask Route Updates (`app.py`)
-- Enhanced the movie detail route to include TMDb data
-- Added a new route for viewing movies directly from TMDb IDs
-- Implemented a recommendation method toggle feature (content-based vs TMDb)
+For the online application, `services/recommendation_service.py` builds the collaborative model lazily from SQLAlchemy `Rating` rows only after configurable minimum interaction/user/item thresholds are met. Changes to persisted ratings invalidate the app-scoped collaborative state.
 
-### 5. User Interface Enhancements (`templates/movie.html`)
-- Completely redesigned the movie detail page to showcase TMDb data:
-  - Added movie poster and backdrop images
-  - Displayed comprehensive movie information (title, overview, release date, runtime, etc.)
-  - Added TMDb rating with visual indicator
-  - Included cast and director information
-  - Added a "Where to Watch" section with streaming/rental/purchase options
-  - Embedded YouTube trailers
-  - Listed keywords associated with the movie
-  - Enhanced the recommendation display with movie posters and additional information
-- Implemented a toggle switch to choose between recommendation methods
+### Hybrid personalization
 
-### 6. Configuration and Security
-- Updated the example environment file (`.env.example`) to include TMDb API key configuration
-- Added necessary dependencies to `requirements.txt`
-- Ensured the TMDb API key is loaded securely from environment variables
+`models/hybrid_recommender.py` combines bounded content and collaborative candidate lists. It supports:
 
-## Technical Improvements
+- normalized weighted-score fusion;
+- reciprocal-rank fusion;
+- configurable content/collaborative weights;
+- exclusion of already-known items;
+- recommendation reasons based on contributing signals.
 
-### 1. Data Enrichment
-The integration significantly enhances the movie data available in the system. For each movie, we now have:
-- High-quality poster and backdrop images
-- Detailed movie information (overview, release date, runtime, etc.)
-- Cast and director information
-- Associated keywords
-- Trailers
-- Watch providers (streaming services, rental options, etc.)
+Cold-start behavior falls back to available content similarity, popularity from persisted application-user ratings, or deterministic catalog candidates.
 
-### 2. Improved Recommendations
-The recommendation quality has been improved in two ways:
-- **Enhanced Content-Based Filtering**: By incorporating TMDb keywords, cast, and crew data into the TF-IDF matrix
-- **TMDb Similar Movies**: Offering an alternative recommendation source from TMDb's own algorithm
+### TMDb enrichment
 
-### 3. Caching and Performance
-To ensure good performance and respect API rate limits:
-- Implemented dictionary-based caching for API responses
-- Used Python's LRU cache for frequently accessed functions
-- Set appropriate cache expiration times (24 hours for most data)
+`services/tmdb_service.py` and `services/movie_service.py` provide optional external enrichment without making TMDb a hard dependency for local catalog availability.
 
-### 4. Error Handling
-Robust error handling has been implemented throughout the TMDb integration:
-- Network error handling for API requests
-- Graceful fallbacks when TMDb data is unavailable
-- Appropriate user feedback when errors occur
+Implemented behavior includes:
 
-## User Experience Improvements
-The TMDb integration significantly enhances the user experience:
-- Visually appealing movie detail pages with posters and backdrops
-- Rich movie information beyond basic metadata
-- Video content (trailers) embedded directly in the page
-- Information about where to watch movies
-- Multiple recommendation options
-- Better recognition of movies through official artwork
+- local-title/year matching to TMDb IDs;
+- persisted local-to-TMDb mappings;
+- persisted normalized enrichment;
+- bounded request timeouts;
+- retry/backoff for transient failures;
+- process-local HTTP response caching;
+- configurable fresh/stale/mapping TTLs;
+- stale-cache fallback;
+- configurable watch-provider region;
+- posters/backdrops/details and TMDb similar titles on movie pages.
 
-## Future Enhancements
-Potential future improvements to the TMDb integration:
-- Periodic background updating of TMDb data
-- More sophisticated matching between local movie database and TMDb
-- Expanded use of TMDb endpoints (reviews, popular movies, etc.)
-- User preferences for default recommendation method 
+Without a TMDb API key, the local application continues to operate with reduced enrichment.
+
+### Observability and deployment
+
+The application exposes:
+
+- `GET /health/live` for liveness;
+- `GET /health/ready` for database + catalog readiness;
+- text logging for local development;
+- structured JSON logging for production;
+- per-request method/path/status/duration telemetry.
+
+The recommender is intentionally a degradable rather than critical readiness dependency because the application retains catalog/fallback behavior when it is disabled or unavailable.
+
+Production startup is documented around `wsgi:app` and validated with Gunicorn in CI. See `DEPLOYMENT.md`.
+
+## Testing and CI
+
+GitHub Actions runs on pull requests and pushes to `main` and currently covers:
+
+- Python 3.10 and Python 3.13 test boundaries;
+- pytest with coverage across application, blueprints, data, database, models, services, and observability;
+- Python compilation checks;
+- fatal Ruff correctness rules;
+- Bandit medium/high severity scanning;
+- an explicit allowlist guard for trusted local pickle deserialization sites;
+- `pip-audit` runtime dependency auditing;
+- Gunicorn configuration validation, production boot, and liveness/readiness probes.
+
+The CI workflows use read-only repository permissions and do not need application secrets or live TMDb credentials.
+
+## Repository Cleanup
+
+Phase 8 establishes the following repository hygiene rules:
+
+- `data/movies.csv` is the only committed movie catalog copy.
+- The removed root `recommendation.py` is not an active recommender; `models/content_based.py` is authoritative.
+- Synthetic ratings are not generated as a production personalization source.
+- Unused Marshmallow schemas/dependency were removed rather than retaining an unreferenced serialization layer.
+- The obsolete pre-blueprint movie template and stale project-structure document were removed.
+- Placeholder demo/instruction artifacts were removed while the actual fallback image/CSS used by templates remain.
+- `.gitignore` has one consolidated set of rules for secrets, local state, model/cache artifacts, logs, editor files, and generated output.
+
+## Current Repository Layout
+
+The important runtime boundaries are:
+
+- `app.py` — application factory and extension initialization.
+- `blueprints/` — HTTP route layer.
+- `services/` — application/business logic.
+- `models/` — recommendation algorithms and evaluation helpers.
+- `data/` — canonical catalog, offline ratings, and `DataLoader`.
+- `database/` — Flask-SQLAlchemy initialization and ORM models.
+- `forms/` — authentication forms.
+- `templates/`, `static/` — web UI.
+- `scripts/` — CI/security helper scripts.
+- `tests/` — regression suite.
+- `generate_embeddings.py` — full-catalog embedding cache utility.
+- `model_training.py` — offline training/evaluation utility.
+- `.github/workflows/` — CI and deployment smoke workflows.
+
+See `README.md` for setup/usage and `CONTRIBUTING.md` for the developer contract.
+
+## Security Posture
+
+The current repository avoids committed runtime secrets, loads TMDb credentials from configuration, uses CSRF/session protections, bounds outbound requests, audits runtime dependencies, scans application code, and constrains pickle deserialization to explicitly reviewed local model/cache artifacts.
+
+Security reporting guidance is in `SECURITY.md`.
+
+## Future Work (Not Yet Implemented)
+
+The following are reasonable future enhancements, not claims about current functionality:
+
+- database migration tooling (for example, versioned schema migrations) for production schema evolution;
+- a shared/external cache and production database configuration for multi-instance deployments;
+- scheduled/background TMDb refresh instead of refresh-on-access behavior;
+- container/image packaging and an opinionated deployment manifest;
+- broader browser/end-to-end accessibility and UI tests;
+- expanded offline recommendation evaluation/monitoring and model-quality benchmarks;
+- higher test coverage in route/UI and offline evaluation paths;
+- versioned releases/changelog automation.
+
+These items are intentionally separated from the completed repair work so documentation does not describe implemented features as future work or future ideas as already shipped.
