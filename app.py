@@ -33,7 +33,7 @@ login_manager.login_message_category = "info"
 
 
 def _initialize_recommender(app, embedding_args):
-    """Initialize the app-scoped data loader and full-catalog content recommender."""
+    """Initialize the catalog first, then attach the optional content recommender."""
     settings = {
         "rebuild_embeddings": False,
         "batch_size": app.config.get("EMBEDDING_BATCH_SIZE", 32),
@@ -52,13 +52,21 @@ def _initialize_recommender(app, embedding_args):
             movies_path=app.config["MOVIES_CSV"],
             ratings_path=app.config.get("RATINGS_CSV"),
         )
-        movies_df = app.data_loader.get_movies()
+    except Exception:
+        logger.exception("Catalog data initialization failed")
+        app.data_loader = None
+        app.recommender = None
+        return
 
-        required_columns = {"movieId", "title", "genres", "clean_title", "overview"}
-        if not required_columns.issubset(movies_df.columns):
-            missing = sorted(required_columns.difference(movies_df.columns))
-            raise ValueError(f"Movies dataset is missing required columns: {missing}")
+    movies_df = app.data_loader.get_movies()
+    required_columns = {"movieId", "title", "genres", "clean_title", "overview"}
+    if not required_columns.issubset(movies_df.columns):
+        missing = sorted(required_columns.difference(movies_df.columns))
+        logger.error("Movies dataset is missing required columns: %s", missing)
+        app.recommender = None
+        return
 
+    try:
         app.recommender = ContentBasedRecommender(
             transformer_model=app.config.get(
                 "TRANSFORMER_MODEL",
@@ -72,8 +80,9 @@ def _initialize_recommender(app, embedding_args):
             batch_size=batch_size,
         )
     except Exception:
-        logger.exception("Data/recommender initialization failed")
-        app.data_loader = None
+        logger.exception(
+            "Content recommender initialization failed; catalog browsing remains available"
+        )
         app.recommender = None
 
 
