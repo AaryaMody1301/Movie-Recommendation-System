@@ -1,32 +1,37 @@
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Flask-WTF
-Flask-Caching
-python-dotenv
-Werkzeug
-#pandas
-numpy
-scikit-learn
-scipy
-matplotlib
-seaborn
-sentence-transformers
-torch
-transformers
-surprise
-SQLAlchemy
-WTForms
-email-validator
-marshmallow
-Jinja2
-itsdangerous
-gunicorn
-click
-joblib
-requests
-tmdbv3api
+# Core web application
+Flask>=3.1,<4
+Flask-SQLAlchemy>=3.1,<4
+Flask-Login>=0.6,<1
+Flask-WTF>=1.2,<2
+Flask-Caching>=2.3,<3
+python-dotenv>=1.0,<2
+Werkzeug>=3.1,<4
+Jinja2>=3.1,<4
+itsdangerous>=2.2,<3
+click>=8.1,<9
+gunicorn>=23,<24
 
-# For development/testing
-pytest
-coverage
+# Data and machine learning
+pandas>=2.2,<3
+numpy>=1.26,<3
+scikit-learn>=1.5,<2
+scipy>=1.13,<2
+joblib>=1.4,<2
+sentence-transformers>=3,<6
+torch>=2.2,<3
+transformers>=4.40,<6
+scikit-surprise>=1.1.5,<2
+matplotlib>=3.8,<4
+seaborn>=0.13,<1
+
+# Database, forms, validation, and API clients
+SQLAlchemy>=2.0.31,<3
+WTForms>=3.1,<4
+email-validator>=2.1,<3
+marshmallow>=3.21,<5
+requests>=2.32,<3
+tmdbv3api>=1.9,<2
+
+# Development and testing
+pytest>=8,<9
+coverage>=7,<8
