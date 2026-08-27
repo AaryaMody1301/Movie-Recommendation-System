@@ -204,17 +204,14 @@ def _persisted_popular_candidates(limit: int, exclude_ids=None) -> List[Dict]:
 
 
 def _catalog_fallback(limit: int, exclude_ids=None) -> List[Dict]:
-    """Deterministic cold-start fallback when the application has no rating evidence."""
+    """Deterministic cold-start fallback from catalog metadata, not baseline ratings."""
     excluded = {int(value) for value in (exclude_ids or [])}
-    # Read enough rows to skip exclusions without relying on the synthetic baseline ratings.
-    rows, _ = movie_service.get_all_movies(
-        page=1,
-        per_page=min(100, max(int(limit) * 3, int(limit))),
-        sort_by="title",
-        sort_order="asc",
-    )
+    frame = _data_loader().get_movies().copy()
+    if "title" in frame.columns:
+        frame = frame.sort_values(["title", "movieId"], ascending=[True, True], na_position="last")
     result = []
-    for movie in rows:
+    for _, row in frame.iterrows():
+        movie = row.to_dict()
         movie_id = int(movie["movieId"])
         if movie_id in excluded:
             continue
