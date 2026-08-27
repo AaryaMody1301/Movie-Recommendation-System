@@ -1,41 +1,44 @@
--- Schema for Movie Recommendation System
+-- Reference schema for Movie Recommendation System.
+-- Runtime table creation is handled by Flask-SQLAlchemy models in database/models.py.
 
--- Users table
-CREATE TABLE users (
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    email TEXT UNIQUE NOT NULL,
+    username TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    last_login TEXT
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME
 );
 
--- User ratings table
-CREATE TABLE ratings (
+CREATE INDEX IF NOT EXISTS ix_users_username ON users (username);
+CREATE INDEX IF NOT EXISTS ix_users_email ON users (email);
+
+CREATE TABLE IF NOT EXISTS ratings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     movie_id INTEGER NOT NULL,
-    rating REAL NOT NULL,
-    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+    rating REAL NOT NULL CHECK (rating >= 0.5 AND rating <= 5.0),
+    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user_id, movie_id)
 );
 
--- User watchlist table
-CREATE TABLE watchlist (
+CREATE INDEX IF NOT EXISTS ix_ratings_user_id ON ratings (user_id);
+CREATE INDEX IF NOT EXISTS ix_ratings_movie_id ON ratings (movie_id);
+CREATE INDEX IF NOT EXISTS ix_ratings_timestamp ON ratings (timestamp);
+
+CREATE TABLE IF NOT EXISTS watchlist (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     movie_id INTEGER NOT NULL,
-    added_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    notes TEXT
+    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (user_id, movie_id)
 );
 
--- Create indexes
-CREATE INDEX idx_ratings_user_id ON ratings (user_id);
-CREATE INDEX idx_ratings_movie_id ON ratings (movie_id);
-CREATE INDEX idx_ratings_user_movie ON ratings (user_id, movie_id);
-CREATE INDEX idx_watchlist_user_id ON watchlist (user_id);
-CREATE INDEX idx_watchlist_movie_id ON watchlist (movie_id);
-CREATE INDEX idx_watchlist_user_movie ON watchlist (user_id, movie_id);
-
--- Add indexes for timestamp/datetime columns
-CREATE INDEX idx_ratings_timestamp ON ratings (timestamp);
-CREATE INDEX idx_watchlist_added_at ON watchlist (added_at); 
+CREATE INDEX IF NOT EXISTS ix_watchlist_user_id ON watchlist (user_id);
+CREATE INDEX IF NOT EXISTS ix_watchlist_movie_id ON watchlist (movie_id);
+CREATE INDEX IF NOT EXISTS ix_watchlist_added_at ON watchlist (added_at);
