@@ -1,9 +1,17 @@
 """CI smoke check for the real Sentence Transformers content-model boundary."""
 
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
 
 import pandas as pd
+
+# When this file is executed directly, Python places scripts/ rather than the
+# repository root on sys.path. Add the project root explicitly so the smoke
+# validates the same local package imports used by the application.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.content_based import ContentBasedRecommender
 
