@@ -1,9 +1,8 @@
-"""Database extension and initialization helpers."""
+"""Database extension and migration initialization helpers."""
 
 import sqlite3
 
-import click
-from flask.cli import with_appcontext
+from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import MetaData, event
 from sqlalchemy.engine import Engine
@@ -18,6 +17,7 @@ NAMING_CONVENTION = {
 
 metadata = MetaData(naming_convention=NAMING_CONVENTION)
 db = SQLAlchemy(metadata=metadata)
+migrate = Migrate(compare_type=True, render_as_batch=True)
 
 
 @event.listens_for(Engine, "connect")
@@ -34,28 +34,7 @@ def get_db():
     return db.session
 
 
-def init_db():
-    """Create any missing tables from the SQLAlchemy model metadata."""
-    # Import models before create_all so every mapped table is registered.
-    from database import models  # noqa: F401
-
-    db.create_all()
-
-
-@click.command("init-db")
-@with_appcontext
-def init_db_command():
-    """Create any missing database tables."""
-    init_db()
-    click.echo("Initialized the database.")
-
-
 def init_app(app):
-    """Attach SQLAlchemy and database CLI commands to a Flask app."""
+    """Attach SQLAlchemy and Flask-Migrate to a Flask application."""
     db.init_app(app)
-    app.cli.add_command(init_db_command)
-
-    # The project does not have Alembic migrations yet. Until Phase 7 adds them,
-    # create missing tables without dropping or rewriting existing user data.
-    with app.app_context():
-        init_db()
+    migrate.init_app(app, db)

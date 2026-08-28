@@ -13,7 +13,7 @@ def _create_test_app(monkeypatch, tmp_path):
         app.recommender = None
 
     monkeypatch.setattr(app_module, "_initialize_recommender", skip_recommender)
-    return app_module.create_app(
+    app = app_module.create_app(
         test_config={
             "TESTING": True,
             "SECRET_KEY": "phase2-test-secret",
@@ -22,6 +22,9 @@ def _create_test_app(monkeypatch, tmp_path):
             "WTF_CSRF_ENABLED": False,
         }
     )
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 def test_canonical_blueprints_are_registered(monkeypatch, tmp_path):

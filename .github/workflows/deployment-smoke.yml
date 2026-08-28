@@ -20,11 +20,27 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - run: python -m pip install --upgrade pip
+      - name: Install CPU PyTorch
+        run: python -m pip install "torch>=2.2,<3" --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pip install -r requirements.txt
+      - name: Apply and verify database migrations
+        env:
+          FLASK_ENV: production
+          SECRET_KEY: ci-only-secret-key-for-production-smoke
+          DATABASE_URI: sqlite:///ci-health.db
+          MOVIES_CSV: data/movies.csv
+          RATINGS_CSV: ""
+          RECOMMENDER_ENABLED: "false"
+          TMDB_API_KEY: ""
+          LOG_FORMAT: json
+          APP_VERSION: ci
+        run: |
+          flask --app app db upgrade
+          flask --app app db check
       - name: Validate Gunicorn configuration
         env:
           FLASK_ENV: production
-          SECRET_KEY: ci-only-secret-key
+          SECRET_KEY: ci-only-secret-key-for-production-smoke
           DATABASE_URI: sqlite:///ci-health.db
           MOVIES_CSV: data/movies.csv
           RATINGS_CSV: ""
@@ -36,7 +52,7 @@ jobs:
       - name: Boot and probe production WSGI app
         env:
           FLASK_ENV: production
-          SECRET_KEY: ci-only-secret-key
+          SECRET_KEY: ci-only-secret-key-for-production-smoke
           DATABASE_URI: sqlite:///ci-health.db
           MOVIES_CSV: data/movies.csv
           RATINGS_CSV: ""

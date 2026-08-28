@@ -4,6 +4,7 @@ import json
 import logging
 
 import app as app_module
+from database.db import db
 from observability import JsonFormatter
 
 
@@ -32,7 +33,10 @@ def _create_app(tmp_path, **overrides):
         "LOG_FORMAT": "text",
     }
     config.update(overrides)
-    return app_module.create_app(test_config=config)
+    app = app_module.create_app(test_config=config)
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 def test_liveness_and_readiness_report_critical_state(tmp_path):

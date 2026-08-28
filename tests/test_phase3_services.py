@@ -16,10 +16,18 @@ class FakeRecommender:
         self.loader = loader
 
     def get_recommendations(self, movie_id, top_n=10):
-        candidates = [movie for movie in self.loader.get_movies().to_dict("records") if movie["movieId"] != movie_id]
+        candidates = [
+            movie
+            for movie in self.loader.get_movies().to_dict("records")
+            if movie["movieId"] != movie_id
+        ]
         return [
             {
-                "movie": {"movieId": movie["movieId"], "title": movie["title"], "genres": movie["genres"]},
+                "movie": {
+                    "movieId": movie["movieId"],
+                    "title": movie["title"],
+                    "genres": movie["genres"],
+                },
                 "score": 0.9 - index * 0.1,
                 "reason": f"Similar to {movie_id}",
             }
@@ -62,6 +70,8 @@ def _create_test_app(monkeypatch, tmp_path):
             "CACHE_TYPE": "SimpleCache",
         }
     )
+    with app.app_context():
+        db.create_all()
     return app
 
 
@@ -140,7 +150,11 @@ def test_personalized_recommendations_read_persisted_user_ratings(monkeypatch, t
         user = _create_user("recommendee")
         assert user_service.add_user_rating(user.id, 1, 5.0)["success"]
 
-        items, total = recommendation_service.get_recommendations_for_user(user.id, page=1, per_page=3)
+        items, total = recommendation_service.get_recommendations_for_user(
+            user.id,
+            page=1,
+            per_page=3,
+        )
         assert total > 0
         assert items
         assert all(item["movie"]["movieId"] != 1 for item in items)

@@ -11,7 +11,7 @@ from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
 
 from blueprints import register_blueprints
-from config import get_config
+from config import DEVELOPMENT_SECRET_KEY, get_config
 from data.data_loader import DataLoader
 from database.db import init_app as init_database
 from models.content_based import ContentBasedRecommender
@@ -28,6 +28,18 @@ csrf = CSRFProtect()
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
 login_manager.login_message_category = "info"
+
+
+def _validate_runtime_config(app):
+    """Fail closed for unsafe or ambiguous production configuration."""
+    if app.config.get("ENVIRONMENT") != "production":
+        return
+
+    secret_key = app.config.get("SECRET_KEY")
+    if not secret_key or secret_key == DEVELOPMENT_SECRET_KEY:
+        raise RuntimeError(
+            "Production requires SECRET_KEY to be set to a private, non-development value"
+        )
 
 
 def _initialize_recommender(app, embedding_args):
@@ -98,6 +110,8 @@ def create_app(test_config=None, embedding_args=None):
 
     if test_config:
         app.config.from_mapping(test_config)
+
+    _validate_runtime_config(app)
 
     configure_logging(
         app.config.get("LOG_LEVEL", "INFO"),
