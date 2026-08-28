@@ -32,13 +32,11 @@ def test_production_rejects_missing_or_development_secret(tmp_path):
         "UPLOAD_FOLDER": str(tmp_path / "uploads"),
     }
 
-    with pytest.raises(RuntimeError, match="Production requires SECRET_KEY"):
-        app_module.create_app(test_config={**common, "SECRET_KEY": None})
-
-    with pytest.raises(RuntimeError, match="Production requires SECRET_KEY"):
-        app_module.create_app(
-            test_config={**common, "SECRET_KEY": DEVELOPMENT_SECRET_KEY}
-        )
+    for unsafe_secret in (None, DEVELOPMENT_SECRET_KEY, "change-me"):
+        with pytest.raises(RuntimeError, match="Production requires SECRET_KEY"):
+            app_module.create_app(
+                test_config={**common, "SECRET_KEY": unsafe_secret}
+            )
 
 
 def test_unknown_flask_environment_fails_closed(monkeypatch):

@@ -1,12 +1,10 @@
 """Shared pytest lifecycle cleanup for SQLAlchemy-backed tests."""
 
-import weakref
-
 import pytest
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
-_test_engines = weakref.WeakSet()
+_test_engines = set()
 
 
 @event.listens_for(Engine, "engine_connect")

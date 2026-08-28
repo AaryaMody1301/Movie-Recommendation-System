@@ -11,7 +11,7 @@ from flask_login import LoginManager
 from flask_wtf.csrf import CSRFProtect
 
 from blueprints import register_blueprints
-from config import DEVELOPMENT_SECRET_KEY, get_config
+from config import INSECURE_SECRET_KEYS, get_config
 from data.data_loader import DataLoader
 from database.db import init_app as init_database
 from models.content_based import ContentBasedRecommender
@@ -36,7 +36,7 @@ def _validate_runtime_config(app):
         return
 
     secret_key = app.config.get("SECRET_KEY")
-    if not secret_key or secret_key == DEVELOPMENT_SECRET_KEY:
+    if not secret_key or secret_key in INSECURE_SECRET_KEYS:
         raise RuntimeError(
             "Production requires SECRET_KEY to be set to a private, non-development value"
         )

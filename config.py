@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEVELOPMENT_SECRET_KEY = "dev-secret-key-change-in-production"
+INSECURE_SECRET_KEYS = frozenset({DEVELOPMENT_SECRET_KEY, "change-me"})
 
 
 def _env_bool(name, default=False):
