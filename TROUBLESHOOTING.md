@@ -7,7 +7,6 @@ This guide covers common development and deployment problems for the current Fla
 Check the configured movie catalog first:
 
 ```bash
-# Default
 MOVIES_CSV=data/movies.csv
 ```
 
@@ -31,6 +30,13 @@ Options:
 - build the cache separately with `python generate_embeddings.py`;
 - reduce `EMBEDDING_BATCH_SIZE` if memory is constrained;
 - use `python run.py --rebuild-embeddings` only when a forced rebuild is intended.
+
+On CPU-only Linux machines, preinstall the official CPU PyTorch wheel before `requirements.txt` if pip otherwise resolves CUDA runtime packages:
+
+```bash
+python -m pip install "torch>=2.2,<3" --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+```
 
 The embedding cache is fingerprint-validated against relevant catalog/model inputs, so incompatible caches are rebuilt rather than silently reused.
 
@@ -61,9 +67,39 @@ Before those thresholds are met, recommendations use content signals and determi
 
 If thresholds are met but collaborative results are still absent, inspect logs for `Persisted collaborative model build failed` and verify the persisted movie IDs exist in the current catalog.
 
+## Database tables are missing
+
+Application startup does not create tables automatically. For a new database, run:
+
+```bash
+flask --app app db upgrade
+```
+
+Then verify that the database matches the current ORM models:
+
+```bash
+flask --app app db current
+flask --app app db check
+```
+
+If `db check` reports pending operations, do not use `db.create_all()` to bypass migrations. Generate/review the required migration during development or deploy the missing committed revision.
+
+## Existing pre-migration database fails on the baseline revision
+
+If the database already contains the current application tables but has no `alembic_version` table, it may have been created before Flask-Migrate was introduced. Back it up and follow the one-time adoption procedure in `DEPLOYMENT.md`.
+
+For a database confirmed to match the baseline schema:
+
+```bash
+flask --app app db stamp 0001_initial
+flask --app app db check
+```
+
+Only retain the stamp if `db check` reports no drift. Do not stamp an empty database; use `db upgrade` instead.
+
 ## Ratings or watchlist entries disappear after restart
 
-Confirm `DATABASE_URI` points to the intended persistent database.
+Confirm `DATABASE_URI` points to the intended persistent database and that migrations have been applied.
 
 The default relative SQLite URI is:
 
@@ -77,15 +113,18 @@ For external databases, ensure the URI is valid and the application process has 
 
 ## Database/readiness errors
 
-Use the operational endpoints to separate process and dependency failures:
+Use migration state plus the operational endpoints to separate schema, process, and dependency failures:
 
 ```bash
+flask --app app db current
+flask --app app db check
 curl -i http://127.0.0.1:5000/health/live
 curl -i http://127.0.0.1:5000/health/ready
 ```
 
 - `/health/live` returning 200 means Flask can serve requests.
 - `/health/ready` returning 503 means either the database or local movie catalog is unavailable.
+- `db check` returning non-zero means the checked-out ORM models and migration history are out of sync.
 
 The content recommender is intentionally non-critical to readiness because the application has fallback behavior.
 
@@ -114,21 +153,30 @@ Restart the process after changing configuration. Previously persisted enrichmen
 
 ## Gunicorn configuration or startup fails
 
-Validate the production import target without entering the serving loop:
+The WSGI target intentionally fails unless production configuration is explicit. At minimum set:
 
 ```bash
+export FLASK_ENV=production
+export SECRET_KEY='a-private-random-secret'
+flask --app app db upgrade
 gunicorn --check-config wsgi:app
 ```
 
 Then test a minimal server:
 
 ```bash
-FLASK_ENV=production RECOMMENDER_ENABLED=false gunicorn --workers 1 --bind 127.0.0.1:8000 wsgi:app
+RECOMMENDER_ENABLED=false gunicorn --workers 1 --bind 127.0.0.1:8000 wsgi:app
 ```
 
 Probe both health endpoints. If this works with the recommender disabled but fails when enabled, investigate model/cache resources rather than the WSGI boundary.
 
 See `DEPLOYMENT.md` for the supported production configuration.
+
+## Tests fail with ResourceWarning
+
+`ResourceWarning` is an error in the pytest configuration. SQLAlchemy test engines are tracked and disposed after every test; new tests should use application contexts normally and must not retain database connections beyond the test.
+
+If a new warning appears, find the code or fixture retaining the connection rather than filtering or suppressing the warning.
 
 ## Tests cannot import application modules
 
@@ -151,6 +199,8 @@ FLASK_ENV=testing RECOMMENDER_ENABLED=false pytest
 Reproduce the relevant job from `CONTRIBUTING.md`.
 
 For dependency vulnerabilities, update the affected dependency boundary rather than suppressing `pip-audit`. For Bandit/pickle failures, remember that pickle loading is allowed only at the explicitly guarded local model/cache locations enforced by `scripts/check_pickle_boundary.py`.
+
+If the separate recommender smoke fails, reproduce `python scripts/ci_recommender_smoke.py` with network access and CPU PyTorch installed. That job intentionally exercises the real model dependency boundary.
 
 ## JSON logs are not appearing in production
 

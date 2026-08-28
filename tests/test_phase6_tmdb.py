@@ -29,6 +29,8 @@ def _app(**overrides):
     )
     app.config.update(overrides)
     init_database(app)
+    with app.app_context():
+        db.create_all()
     return app
 
 

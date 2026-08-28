@@ -2,25 +2,29 @@
 
 ## Status
 
-The repository has been repaired from a collection of partially overlapping implementations into one coherent Flask application. The active architecture uses a single application factory, blueprint routes, SQLAlchemy persistence, one canonical catalog loader, modern content embeddings, persisted-user collaborative signals, bounded hybrid fusion, optional TMDb enrichment, and GitHub Actions validation.
+The repository has been repaired and production-hardened into one coherent Flask application. The active architecture uses a single application factory, blueprint routes, SQLAlchemy persistence with versioned Flask-Migrate/Alembic schema history, one canonical catalog loader, modern content embeddings, persisted-user collaborative signals, bounded hybrid fusion, optional TMDb enrichment, and GitHub Actions validation.
 
-This document describes what is implemented **now**. Historical goals and completed repair phases are tracked in `ROADMAP.md`.
+This document describes what is implemented **now**. Historical repair phases are tracked in `ROADMAP.md`.
 
 ## Implemented Application
 
-### Flask application and routes
+### Flask application and production configuration
 
 - `app.create_app` is the canonical application factory.
-- `wsgi:app` is the production WSGI target.
-- `run.py` is the development entry point and supports embedding rebuild/batch options.
+- `wsgi:app` is the production WSGI target and requires `FLASK_ENV=production`.
+- Unknown `FLASK_ENV` values fail closed rather than silently selecting development configuration.
+- Production refuses a missing secret key or the public development fallback value.
+- `run.py` remains the development entry point and supports embedding rebuild/batch options.
 - Routes are organized under `blueprints/` for top-level pages, authentication, movie browsing/search/details, recommendations, user interactions, and health checks.
 - WTForms/CSRF protection and Flask-Login are integrated into the active application.
 
-### Persistent user data
+### Persistent user data and migrations
 
-SQLAlchemy-backed models persist registered users and application interactions. Ratings and watchlist entries are not in-memory placeholders and are subject to database uniqueness/relationship constraints.
+SQLAlchemy-backed models persist registered users, ratings, watchlist entries, durable TMDb mappings, and normalized TMDb enrichment cache rows. Ratings and watchlist entries are subject to database uniqueness/relationship constraints.
 
 The default local database is SQLite under Flask's `instance/` directory, with `DATABASE_URI` available for an alternate SQLAlchemy database.
+
+Schema state is versioned under `migrations/` with Flask-Migrate/Alembic. Runtime application startup no longer calls `db.create_all()`. Fresh databases are created with `flask --app app db upgrade`, and CI verifies both migration application and migration/ORM drift with `flask --app app db check`.
 
 ### Canonical catalog and baseline ratings
 
@@ -30,35 +34,21 @@ The default local database is SQLite under Flask's `instance/` directory, with `
 
 ### Search and browsing
 
-The active catalog layer supports:
-
-- literal-safe title search;
-- token-aware genre matching;
-- pagination across complete result sets rather than pre-truncated samples;
-- configurable sorting;
-- catalog fallbacks when external enrichment is unavailable.
+The active catalog layer supports literal-safe title search, token-aware genre matching, pagination across complete result sets, configurable sorting, and catalog fallbacks when external enrichment is unavailable.
 
 ### Content-based recommendations
 
-`models/content_based.py` is the active content recommender. It uses Sentence Transformers embeddings over the complete indexed catalog rather than the removed historical standalone TF-IDF implementation.
+`models/content_based.py` is the active content recommender. It uses Sentence Transformers embeddings over the complete indexed catalog.
 
-The content cache is validated using version/model/catalog fingerprints. Compatible caches can be loaded without constructing the transformer; incompatible caches rebuild instead of silently returning stale recommendations. Similarity is calculated on demand for the requested movie rather than storing a dense all-pairs similarity matrix.
+The content cache is validated using version/model/catalog fingerprints. Compatible caches can be loaded without constructing the transformer; incompatible caches rebuild instead of silently returning stale recommendations. Similarity is calculated on demand rather than storing a dense all-pairs similarity matrix.
 
-### Collaborative recommendations
+CI includes a small real-model smoke test using `sentence-transformers/all-MiniLM-L6-v2`, which verifies the actual Torch/Transformers/Sentence-Transformers compatibility boundary without rebuilding the full catalog.
+
+### Collaborative and hybrid recommendations
 
 `models/collaborative_filtering.py` implements matrix-factorization recommendations with corrected raw user/movie ID handling and serialization support.
 
-For the online application, `services/recommendation_service.py` builds the collaborative model lazily from SQLAlchemy `Rating` rows only after configurable minimum interaction/user/item thresholds are met. Changes to persisted ratings invalidate the app-scoped collaborative state.
-
-### Hybrid personalization
-
-`models/hybrid_recommender.py` combines bounded content and collaborative candidate lists. It supports:
-
-- normalized weighted-score fusion;
-- reciprocal-rank fusion;
-- configurable content/collaborative weights;
-- exclusion of already-known items;
-- recommendation reasons based on contributing signals.
+For the online application, `services/recommendation_service.py` builds the collaborative model lazily from SQLAlchemy `Rating` rows only after configurable minimum interaction/user/item thresholds are met. Hybrid fusion supports normalized weighted-score and reciprocal-rank strategies over bounded candidate lists, with exclusion of already-known items and recommendation reasons based on contributing signals.
 
 Cold-start behavior falls back to available content similarity, popularity from persisted application-user ratings, or deterministic catalog candidates.
 
@@ -66,18 +56,7 @@ Cold-start behavior falls back to available content similarity, popularity from 
 
 `services/tmdb_service.py` and `services/movie_service.py` provide optional external enrichment without making TMDb a hard dependency for local catalog availability.
 
-Implemented behavior includes:
-
-- local-title/year matching to TMDb IDs;
-- persisted local-to-TMDb mappings;
-- persisted normalized enrichment;
-- bounded request timeouts;
-- retry/backoff for transient failures;
-- process-local HTTP response caching;
-- configurable fresh/stale/mapping TTLs;
-- stale-cache fallback;
-- configurable watch-provider region;
-- posters/backdrops/details and TMDb similar titles on movie pages.
+Implemented behavior includes local-title/year matching, persisted mappings and enrichment, bounded request timeouts, retry/backoff for transient failures, process-local HTTP caching, configurable TTLs, stale-cache fallback, configurable watch-provider region, posters/backdrops/details, and TMDb similar titles.
 
 Without a TMDb API key, the local application continues to operate with reduced enrichment.
 
@@ -93,72 +72,60 @@ The application exposes:
 
 The recommender is intentionally a degradable rather than critical readiness dependency because the application retains catalog/fallback behavior when it is disabled or unavailable.
 
-Production startup is documented around `wsgi:app` and validated with Gunicorn in CI. See `DEPLOYMENT.md`.
+Production startup is documented around migrations followed by `wsgi:app` and is validated with Gunicorn in CI. See `DEPLOYMENT.md`.
 
 ## Testing and CI
 
-GitHub Actions runs on pull requests and pushes to `main` and currently covers:
+GitHub Actions runs on pull requests and pushes to `main` and covers:
 
 - Python 3.10 and Python 3.13 test boundaries;
-- pytest with coverage across application, blueprints, data, database, models, services, and observability;
+- pytest with branch coverage and an enforced 55% project floor;
+- `ResourceWarning` as a test error plus explicit SQLAlchemy engine disposal between isolated tests;
 - Python compilation checks;
 - fatal Ruff correctness rules;
 - Bandit medium/high severity scanning;
 - an explicit allowlist guard for trusted local pickle deserialization sites;
 - `pip-audit` runtime dependency auditing;
+- CPU-only PyTorch installation on CPU runners to avoid unused CUDA packages;
+- a real Sentence Transformers content-recommender smoke test;
+- versioned database upgrade and migration-drift checks;
 - Gunicorn configuration validation, production boot, and liveness/readiness probes.
 
-The CI workflows use read-only repository permissions and do not need application secrets or live TMDb credentials.
+The CI workflows use read-only repository permissions and do not require application secrets or live TMDb credentials.
 
-## Repository Cleanup
-
-Phase 8 establishes the following repository hygiene rules:
-
-- `data/movies.csv` is the only committed movie catalog copy.
-- The removed root `recommendation.py` is not an active recommender; `models/content_based.py` is authoritative.
-- Synthetic ratings are not generated as a production personalization source.
-- Unused Marshmallow schemas/dependency were removed rather than retaining an unreferenced serialization layer.
-- The obsolete pre-blueprint movie template and stale project-structure document were removed.
-- Placeholder demo/instruction artifacts were removed while the actual fallback image/CSS used by templates remain.
-- `.gitignore` has one consolidated set of rules for secrets, local state, model/cache artifacts, logs, editor files, and generated output.
-
-## Current Repository Layout
-
-The important runtime boundaries are:
+## Repository Boundaries
 
 - `app.py` — application factory and extension initialization.
+- `config.py` — fail-closed environment configuration.
 - `blueprints/` — HTTP route layer.
 - `services/` — application/business logic.
 - `models/` — recommendation algorithms and evaluation helpers.
 - `data/` — canonical catalog, offline ratings, and `DataLoader`.
-- `database/` — Flask-SQLAlchemy initialization and ORM models.
+- `database/` — Flask-SQLAlchemy and Flask-Migrate extension setup plus ORM models.
+- `migrations/` — committed schema history.
 - `forms/` — authentication forms.
 - `templates/`, `static/` — web UI.
-- `scripts/` — CI/security helper scripts.
-- `tests/` — regression suite.
-- `generate_embeddings.py` — full-catalog embedding cache utility.
-- `model_training.py` — offline training/evaluation utility.
+- `scripts/` — CI/security/recommender smoke helpers.
+- `tests/` — regression and production-hardening suite.
 - `.github/workflows/` — CI and deployment smoke workflows.
 
 See `README.md` for setup/usage and `CONTRIBUTING.md` for the developer contract.
 
 ## Security Posture
 
-The current repository avoids committed runtime secrets, loads TMDb credentials from configuration, uses CSRF/session protections, bounds outbound requests, audits runtime dependencies, scans application code, and constrains pickle deserialization to explicitly reviewed local model/cache artifacts.
+The repository avoids committed runtime secrets, fails closed for unsafe production session configuration, loads TMDb credentials from configuration, uses CSRF/session protections, bounds outbound requests, audits runtime dependencies, scans application code, constrains pickle deserialization to reviewed local artifacts, and validates production startup in CI.
 
 Security reporting guidance is in `SECURITY.md`.
 
-## Future Work (Not Yet Implemented)
+## Optional Future Enhancements
 
-The following are reasonable future enhancements, not claims about current functionality:
+The core repair/hardening work is complete. Reasonable future product or infrastructure enhancements include:
 
-- database migration tooling (for example, versioned schema migrations) for production schema evolution;
-- a shared/external cache and production database configuration for multi-instance deployments;
+- an external/shared cache and managed production database for multi-instance deployments;
 - scheduled/background TMDb refresh instead of refresh-on-access behavior;
 - container/image packaging and an opinionated deployment manifest;
 - broader browser/end-to-end accessibility and UI tests;
 - expanded offline recommendation evaluation/monitoring and model-quality benchmarks;
-- higher test coverage in route/UI and offline evaluation paths;
-- versioned releases/changelog automation.
+- versioned release/changelog automation.
 
-These items are intentionally separated from the completed repair work so documentation does not describe implemented features as future work or future ideas as already shipped.
+These are optional enhancements, not unresolved correctness defects in the completed repair roadmap.

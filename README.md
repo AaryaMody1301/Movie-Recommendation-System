@@ -1,8 +1,8 @@
 # Movie Recommendation System
 
-A Flask-based movie discovery and recommendation application with persistent user accounts, ratings and watchlists; transformer-based content similarity; collaborative and hybrid personalization; and optional TMDb enrichment.
+A Flask-based movie discovery and recommendation application with persistent user accounts, ratings and watchlists; transformer-based content similarity; collaborative and hybrid personalization; optional TMDb enrichment; and versioned SQLAlchemy database migrations.
 
-The application is built around a single Flask application factory (`app.create_app`), SQLAlchemy-backed user interactions, one canonical local movie catalog, and production checks that run in GitHub Actions.
+The application is built around a single Flask application factory (`app.create_app`), SQLAlchemy-backed user interactions, one canonical local movie catalog, Alembic/Flask-Migrate schema history, and production checks that run in GitHub Actions.
 
 ## Features
 
@@ -15,8 +15,9 @@ The application is built around a single Flask application factory (`app.create_
 - Explain recommendation signals and provide deterministic cold-start fallbacks.
 - Enrich movie pages with optional TMDb metadata, artwork, similar titles, and region-specific watch providers.
 - Persist TMDb mappings/enrichment while using retry, timeout, stale-cache, and expiry policies.
+- Manage database creation and schema evolution with committed Flask-Migrate/Alembic revisions.
 - Expose liveness/readiness endpoints and structured production logging.
-- Validate Python 3.10 and 3.13, static/security checks, dependency auditing, and Gunicorn startup in GitHub Actions.
+- Validate Python 3.10 and 3.13, coverage, static/security checks, dependency auditing, real Sentence Transformers compatibility, migrations, and Gunicorn startup in GitHub Actions.
 
 ## Requirements
 
@@ -25,6 +26,8 @@ The application is built around a single Flask application factory (`app.create_
 - `TMDB_API_KEY` only if TMDb enrichment is desired. Core local catalog functionality remains available without it.
 
 The first content-recommender startup can download the configured Sentence Transformers model and build the embedding cache. Set `RECOMMENDER_ENABLED=false` when you only need catalog/web/health startup, or pre-generate embeddings with `generate_embeddings.py`.
+
+Linux CPU-only environments can preinstall PyTorch from the official CPU wheel index before installing `requirements.txt`; CI does this to avoid downloading unused CUDA runtime packages.
 
 ## Quick Start
 
@@ -39,6 +42,7 @@ source .venv/bin/activate      # Linux/macOS
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 cp .env.example .env           # Windows: copy .env.example .env
+flask --app app db upgrade
 python run.py
 ```
 
@@ -58,7 +62,8 @@ Copy `.env.example` to `.env` and change values appropriate for the environment.
 
 | Setting | Purpose |
 | --- | --- |
-| `SECRET_KEY` | Flask session/CSRF secret; replace the development value in production. |
+| `FLASK_ENV` | Selects `development`, `testing`, or `production`. Unknown values fail closed. |
+| `SECRET_KEY` | Flask session/CSRF secret. Production refuses a missing or development fallback value. |
 | `DATABASE_URI` | SQLAlchemy database URI. Relative SQLite URIs are stored under Flask's `instance/` directory. |
 | `MOVIES_CSV` | Canonical local movie catalog path; default `data/movies.csv`. |
 | `RATINGS_CSV` | Baseline/offline ratings dataset; not the source of online user personalization. |
@@ -71,6 +76,25 @@ Copy `.env.example` to `.env` and change values appropriate for the environment.
 | `LOG_LEVEL` / `LOG_FORMAT` | Application log severity and text/JSON output. |
 
 See `.env.example` for the complete configuration surface and `DEPLOYMENT.md` for production-specific settings.
+
+## Database Migrations
+
+Database schema state is versioned under `migrations/`. Application startup does not call `db.create_all()`; create or upgrade a database explicitly:
+
+```bash
+flask --app app db upgrade
+```
+
+When ORM models change:
+
+```bash
+flask --app app db migrate -m "describe the schema change"
+# Review the generated migration.
+flask --app app db upgrade
+flask --app app db check
+```
+
+For a database created by a repository version from before migrations were introduced, back it up and follow the one-time adoption procedure in `DEPLOYMENT.md` before applying future migrations.
 
 ## Data Contract
 
@@ -86,7 +110,7 @@ The active recommendation path has three layers:
 2. **Collaborative** — `models/collaborative_filtering.py` uses matrix factorization, while `services/recommendation_service.py` builds the online model lazily from SQLAlchemy-backed user ratings.
 3. **Hybrid** — `models/hybrid_recommender.py` fuses bounded content and collaborative candidate lists using normalized weighted-score or reciprocal-rank strategies rather than a dense full-catalog pairwise matrix.
 
-When user interaction data is insufficient, the service falls back to available content signals, persisted application-user popularity, or deterministic catalog candidates.
+When user interaction data is insufficient, the service falls back to available content similarity, persisted application-user popularity, or deterministic catalog candidates.
 
 ## TMDb Enrichment
 
@@ -102,22 +126,23 @@ Movie pages can show posters/backdrops, metadata, TMDb similar titles, and watch
 ├── config.py                 # Environment-based configuration
 ├── observability.py          # Text/JSON logging configuration
 ├── run.py                    # Development server entry point
-├── wsgi.py                   # Production WSGI object (wsgi:app)
+├── wsgi.py                   # Production-only WSGI object (wsgi:app)
 ├── blueprints/               # Auth, main, movies, recommendations, user, health routes
 ├── services/                 # Auth, movie, recommendation, user, and TMDb business logic
 ├── models/                   # Content, collaborative, hybrid, and evaluation code
 ├── data/                     # Canonical catalog, baseline ratings, DataLoader
-├── database/                 # SQLAlchemy initialization and persistent ORM models
+├── database/                 # SQLAlchemy extension and persistent ORM models
+├── migrations/               # Flask-Migrate/Alembic schema history
 ├── forms/                    # WTForms authentication forms
 ├── templates/                # Jinja templates
 ├── static/                   # CSS, JavaScript, and fallback image assets
-├── scripts/                  # CI/security helper scripts
-├── tests/                    # Regression tests for repair phases 2–7
+├── scripts/                  # CI/security/recommender smoke helper scripts
+├── tests/                    # Regression and production-hardening tests
 ├── generate_embeddings.py    # Pre-build the full-catalog embedding cache
 ├── model_training.py         # Offline model training/evaluation tooling
 ├── requirements.txt          # Runtime dependencies
 ├── requirements-dev.txt      # Runtime + test/quality tooling
-├── DEPLOYMENT.md             # Production and health-check guidance
+├── DEPLOYMENT.md             # Production, migrations, and health-check guidance
 ├── CONTRIBUTING.md           # Development and contribution workflow
 ├── TROUBLESHOOTING.md        # Common local/runtime problems
 ├── SECURITY.md               # Vulnerability reporting guidance
@@ -145,13 +170,16 @@ To reproduce the CI coverage command:
 pytest --cov=app --cov=blueprints --cov=data --cov=database --cov=models --cov=services --cov=observability --cov-report=term-missing
 ```
 
-CI also runs compile/Ruff correctness checks, a trusted-pickle-boundary check, Bandit medium/high severity scanning, and `pip-audit`. See `CONTRIBUTING.md` for the exact commands and expectations.
+Coverage has an enforced 55% project floor. CI also runs compile/Ruff correctness checks, a trusted-pickle-boundary check, Bandit medium/high severity scanning, `pip-audit`, a real Sentence Transformers smoke test, migration drift validation, and production Gunicorn probes. See `CONTRIBUTING.md` for the exact commands and expectations.
 
 ## Production
 
-The production WSGI target is `wsgi:app`.
+The production WSGI target is `wsgi:app`. It refuses to start unless `FLASK_ENV=production`, and production configuration requires a private `SECRET_KEY`.
 
 ```bash
+export FLASK_ENV=production
+export SECRET_KEY='replace-with-a-long-random-secret'
+flask --app app db upgrade
 gunicorn --check-config wsgi:app
 gunicorn --workers 2 --bind 0.0.0.0:8000 wsgi:app
 ```
@@ -161,19 +189,19 @@ Operational endpoints:
 - `GET /health/live` — process liveness.
 - `GET /health/ready` — database + local catalog readiness; returns 503 when a critical dependency is unavailable.
 
-See `DEPLOYMENT.md` for environment variables, structured logging, health semantics, and the deployment smoke boundary.
+See `DEPLOYMENT.md` for environment variables, migration/adoption steps, structured logging, health semantics, and the deployment smoke boundary.
 
 ## Documentation
 
-- `CONTRIBUTING.md` — development setup, tests, security/data boundaries, and pull request expectations.
+- `CONTRIBUTING.md` — development setup, migrations, tests, security/data boundaries, and pull request expectations.
 - `TROUBLESHOOTING.md` — startup, model, database, TMDb, personalization, and health-check issues.
 - `SECURITY.md` — how to report vulnerabilities responsibly.
-- `SUMMARY.md` — what is implemented now and what remains future work.
-- `ROADMAP.md` — the eight-phase repair history.
+- `SUMMARY.md` — the implemented architecture and remaining optional enhancements.
+- `ROADMAP.md` — the completed eight-phase repair history plus final hardening.
 
 ## Current Limitations / Future Opportunities
 
-The repaired repository is functional and continuously validated, but production deployments may still choose to add database migrations, an external/shared cache, background TMDb refresh workers, container packaging, broader browser/end-to-end tests, and deeper offline recommendation evaluation.
+The repaired repository is functional and continuously validated. Larger deployments may still choose to add an external/shared cache, a managed production database, background TMDb refresh workers, container packaging, broader browser/end-to-end tests, and deeper offline recommendation evaluation/monitoring.
 
 ## License
 

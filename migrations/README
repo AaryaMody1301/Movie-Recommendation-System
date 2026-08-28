@@ -1,0 +1,9 @@
+Single-database migration configuration for the Movie Recommendation System.
+
+Create new revisions with:
+
+    flask --app app db migrate -m "describe the schema change"
+
+Review generated migrations before committing them, then apply with:
+
+    flask --app app db upgrade

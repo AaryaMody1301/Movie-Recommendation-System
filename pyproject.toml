@@ -2,6 +2,9 @@
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra"
+filterwarnings = [
+    "error::ResourceWarning",
+]
 
 [tool.coverage.run]
 branch = true
@@ -11,6 +14,7 @@ omit = ["tests/*"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+fail_under = 55
 
 [tool.ruff]
 target-version = "py310"

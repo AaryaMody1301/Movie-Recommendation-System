@@ -13,7 +13,11 @@ class TinyRecommender:
         self.loader = loader
 
     def get_recommendations(self, movie_id, top_n=10):
-        rows = [row for row in self.loader.get_movies().to_dict("records") if row["movieId"] != movie_id]
+        rows = [
+            row
+            for row in self.loader.get_movies().to_dict("records")
+            if row["movieId"] != movie_id
+        ]
         return [
             {"movie": row, "score": 0.8, "reason": "test recommendation"}
             for row in rows[:top_n]
@@ -38,7 +42,7 @@ def _app(monkeypatch, tmp_path):
         app.recommender = TinyRecommender(app.data_loader)
 
     monkeypatch.setattr(app_module, "_initialize_recommender", initialize)
-    return app_module.create_app(
+    app = app_module.create_app(
         test_config={
             "TESTING": True,
             "SECRET_KEY": "phase3-api-secret",
@@ -48,6 +52,9 @@ def _app(monkeypatch, tmp_path):
             "CACHE_TYPE": "SimpleCache",
         }
     )
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 def _login(app):
@@ -76,9 +83,13 @@ def test_rating_and_watchlist_json_validation_and_persistence(monkeypatch, tmp_p
     rating_response = client.post("/api/rate", json={"movieId": 1, "rating": 4.5})
     assert rating_response.status_code == 200
 
-    invalid_notes = client.post("/api/watchlist/add", json={"movieId": 2, "notes": ["not", "text"]})
+    invalid_notes = client.post(
+        "/api/watchlist/add", json={"movieId": 2, "notes": ["not", "text"]}
+    )
     assert invalid_notes.status_code == 400
-    watchlist_response = client.post("/api/watchlist/add", json={"movieId": 2, "notes": "Friday"})
+    watchlist_response = client.post(
+        "/api/watchlist/add", json={"movieId": 2, "notes": "Friday"}
+    )
     assert watchlist_response.status_code == 201
     duplicate_response = client.post("/api/watchlist/add", json={"movieId": 2})
     assert duplicate_response.status_code == 409

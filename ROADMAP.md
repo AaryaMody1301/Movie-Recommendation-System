@@ -1,6 +1,6 @@
 # Movie Recommendation System Repair Roadmap
 
-This roadmap records the eight independently testable phases used to repair and consolidate the repository. Completed phases are historical milestones; the current implementation is summarized in `SUMMARY.md`.
+This roadmap records the eight independently testable phases used to repair and consolidate the repository, followed by the final production-hardening pass. Completed phases are historical milestones; the current implementation is summarized in `SUMMARY.md`.
 
 ## Phase 1 — Security, dependencies, and startup foundation
 
@@ -26,7 +26,7 @@ Goal: remove the two competing Flask architectures and make user data persistenc
 - Choose one route architecture and register only supported blueprints.
 - Remove or migrate duplicate routes from `app.py`.
 - Replace the SQLAlchemy stub with the real Flask-SQLAlchemy/SQLAlchemy stack.
-- Reconcile `schema.sql`, ORM models, and authentication service field names.
+- Reconcile ORM models and authentication service field names.
 - Add foreign keys and uniqueness constraints for ratings/watchlists.
 - Stop silently falling back to in-memory SQLite for unsupported database URIs.
 - Create missing forms and templates required by enabled blueprints.
@@ -38,7 +38,7 @@ Goal: remove the two competing Flask architectures and make user data persistenc
 Goal: make every service operate against one documented DataLoader API.
 
 - Standardize on `movies_df`, `ratings_df`, and public getter methods.
-- Remove direct references to nonexistent `data_loader.movies` / `data_loader.ratings` attributes.
+- Remove direct references to nonexistent loader attributes.
 - Remove duplicate DataLoader instances and use the application-owned instance.
 - Align blueprint imports with real service function names and signatures.
 - Persist user ratings/watchlists instead of using placeholders or in-memory mutations.
@@ -50,11 +50,11 @@ Goal: make every service operate against one documented DataLoader API.
 
 Goal: fix visible product behavior before optimizing model quality.
 
-- Remove premature `.head()` truncation from search and genre browsing.
+- Remove premature result truncation from search and genre browsing.
 - Make search literal-safe and pagination-correct.
 - Match genres as parsed values rather than regex substrings.
 - Normalize fallback recommendation output shapes.
-- Ensure all movie IDs can receive recommendations, not only a random startup sample.
+- Ensure all movie IDs can receive recommendations.
 - Validate embedding caches against dataset/model/config fingerprints.
 - Wire documented model settings into the active application.
 
@@ -68,7 +68,7 @@ Goal: rebuild personalization on top of correct persistent user interactions.
 - Repair collaborative recommender raw-ID handling and model serialization.
 - Rebuild personalized recommendations from persisted user ratings.
 - Implement hybrid scoring with normalized, configurable weights.
-- Avoid dense full-catalog O(N^2) similarity matrices where possible.
+- Avoid dense full-catalog O(N²) similarity matrices where possible.
 - Add recommendation explanations based on real contributing signals.
 
 **Status: complete and merged.**
@@ -77,7 +77,7 @@ Goal: rebuild personalization on top of correct persistent user interactions.
 
 Goal: make external enrichment reliable without making page loads fragile.
 
-- Improve local-to-TMDb movie matching and store resolved TMDb IDs.
+- Improve local-to-TMDb movie matching and persist resolved mappings.
 - Introduce durable/cacheable enrichment rather than repeating title searches.
 - Add retry/backoff policy for transient TMDb failures.
 - Move expensive enrichment away from large synchronous page-load batches.
@@ -105,14 +105,27 @@ Goal: make regressions difficult to reintroduce.
 Goal: leave a coherent project rather than a collection of historical implementations.
 
 - Remove obsolete/dead modules after migrated functionality is verified.
-- Remove duplicate movie dataset copies or clearly define the canonical data source.
+- Establish `data/movies.csv` as the single committed movie catalog.
 - Update README/project structure to match reality.
 - Update `SUMMARY.md` to distinguish implemented features from future work.
 - Add contribution/development instructions and troubleshooting guidance.
 - Complete final repository hygiene and historical cleanup documentation.
 
-**Status: complete; awaiting merge of PR #8.**
+**Status: complete and merged via PR #8.**
 
-### Phase 8 cleanup contract
+## Post-roadmap production hardening
 
-The final cleanup establishes `data/movies.csv` as the only committed movie catalog, removes the superseded standalone TF-IDF recommender and synthetic-ratings helper, removes unused serialization/template/placeholder artifacts and legacy dependencies, consolidates `.gitignore`, and adds current README, summary, contribution, troubleshooting, security, and pull-request documentation.
+The final validation pass closed issues found only after all eight repair phases were merged:
+
+- production rejects missing/public development secret keys and unknown environment names;
+- `wsgi:app` is explicitly production-only;
+- Flask-Migrate/Alembic owns database creation and schema evolution;
+- a reviewed baseline migration represents the current application schema;
+- deployment CI upgrades the database and checks migration/ORM drift before Gunicorn starts;
+- SQLite test engines are disposed cleanly and `ResourceWarning` is an error;
+- coverage has an enforced 55% floor;
+- Linux CI preinstalls CPU-only PyTorch instead of downloading unused CUDA runtimes;
+- CI exercises the real Sentence Transformers model boundary on a small catalog;
+- setup, deployment, contribution, summary, and roadmap documentation match the hardened runtime contract.
+
+**Status: complete in the final production-hardening pass.**
